@@ -61,6 +61,16 @@ namespace TBT {
 
           // the task failed. return to parent
           if (res == FAILED) {
+            // call exit if present
+            std::visit(
+                [&](auto& _t) {
+                  if constexpr (Concepts::has_exit_sig_1<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
+                    exit(_t, _states);
+                  else if constexpr (Concepts::has_exit_sig_2<std::decay_t<decltype(_t)>>)
+                    exit(_t);
+                },
+                *state);
+
             delete state;
             _global_header.ptr_                = _header.parent_;
             _global_header.last_result_.dir_   = UP;
@@ -84,6 +94,16 @@ namespace TBT {
           // no wait signature found and run succeed: task is done
           // if the task is not busy return to parent
           if (!res || (res && (*res == FAILED || *res == SUCCESS))) {
+            // call exit if present
+            std::visit(
+                [&](auto& _t) {
+                  if constexpr (Concepts::has_exit_sig_1<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
+                    exit(_t, _states);
+                  else if constexpr (Concepts::has_exit_sig_2<std::decay_t<decltype(_t)>>)
+                    exit(_t);
+                },
+                *state);
+
             delete state;
             _global_header.ptr_                = _header.parent_;
             _global_header.last_result_.dir_   = UP;
@@ -117,6 +137,16 @@ namespace TBT {
 
         // task is finished
         if (res == FAILED || res == SUCCESS) {
+          // call exit if present
+          std::visit(
+              [&](auto& _t) {
+                if constexpr (Concepts::has_exit_sig_1<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
+                  exit(_t, _states);
+                else if constexpr (Concepts::has_exit_sig_2<std::decay_t<decltype(_t)>>)
+                  exit(_t);
+              },
+              *state);
+
           delete state;
           _global_header.ptr_                = _header.parent_;
           _global_header.last_result_.dir_   = UP;

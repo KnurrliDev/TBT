@@ -1,6 +1,6 @@
 #pragma once
 
-#include <game/tbt/defines.hpp>
+#include <TBT/common/defines.hpp>
 
 namespace TBT {
 

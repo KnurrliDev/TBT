@@ -1,11 +1,11 @@
 #pragma once
 
 #include <TBT/common/defines.hpp>
+#include <TBT/common/static_string.hpp>
 #include <TBT/execute/states.hpp>
-#include <TBT/strtonum/StrToNum.hpp>
 
 /*
-  Grammar:
+  Grammer:
     Hierarchy: Task($n, ...)[Task($n, ...), ...]
       special node: root if no custom root node
                     root[Task($n, ...)[Task($n, ...), ...], Task($n, ...)]
@@ -19,179 +19,262 @@
 
 namespace TBT {
 
-  template <class Iterator>
-  using Part      = std::pair<Iterator, Iterator>;
-
   using Parameter = std::variant<bool, int32_t, float, uint32_t>;
 
   namespace Util {
 
-    template <class String>
-    [[nodiscard]] consteval size_t count_elements(String&& _s, const char _delim) noexcept {
+    template <size_t N>
+    [[nodiscard]] consteval size_t c_count_elements(const sString<N>& _s, const sStringView& _p,
+                                                    const char _delim) noexcept {
       size_t count = 1;
-      for (size_t i = 0; i < _s.size(); ++i) {
-        if (_s[i] == _delim) ++count;
+      for (size_t i = _p.first; i < _p.second; ++i) {
+        if (_s.s_[i] == _delim) ++count;
       }
       return count;
-    }
+    }  // count_elements
 
-    template <size_t Elements, class String>
-    [[nodiscard]] consteval auto csplit(String&& _s, const char _delim) noexcept {
-      using char_t   = std::decay_t<String>::value_type;
-      using string_t = std::basic_string_view<char_t>;
+    template <size_t Elements, size_t N>
+    [[nodiscard]] consteval std::array<std::optional<sStringView>, Elements> c_split(const sString<N>& _s,
+                                                                                     const sStringView& _p,
+                                                                                     const char _delim) noexcept {
+      std::array<std::optional<sStringView>, Elements> result;
 
-      std::array<string_t, Elements> result;
-      size_t start = 0;
-      size_t end   = _s.find(_delim);
+      const std::string_view sv(_s.s_.data(), _s.size_);
+      size_t start = _p.first;
+      size_t end   = sv.find(_delim);
       size_t idx   = 0;
 
-      while (end != std::string::npos) {
+      while (end != std::string::npos && end < _p.second) {
         if (start == end)
-          result[idx++] = string_t();
+          result[idx++] = std::nullopt;
         else
-          result[idx++] = string_t(&_s[start], end - start);
+          result[idx++] = {start, end};
         start = end + 1;
-        end   = _s.find(_delim, start);
+        end   = sv.find(_delim, start);
       }
 
       // Add the last segment
-      if (start == _s.size())
-        result[idx++] = string_t();
+      if (start == _p.second - 1)
+        result[idx++] = std::nullopt;
       else
-        result[idx++] = string_t(&_s[start], _s.size() - start);
+        result[idx++] = {start, _p.second - 1};  // string_t(&_s[start], _s.size() - start);
       return result;
 
     }  // csplit
 
-    template <class Iterator>
-    [[nodiscard]] constexpr std::pair<Iterator, Iterator> clause(Iterator _begin, Iterator _end, const char _open_delim,
-                                                                 const char _close_delim) {
-      constexpr char d1 = _open_delim;
-      constexpr char d2 = _close_delim;
+    template <size_t N>
+    [[nodiscard]] consteval std::optional<sStringView> c_clause(const sString<N>& _s, const sStringView& _p,
+                                                                const char _open_delim, const char _close_delim) {
+      const char d1 = _open_delim;
+      const char d2 = _close_delim;
 
-      int32_t c         = 0;
+      int32_t c     = 0;
 
       // find open
-      Iterator it_o     = _begin;
-      for (; it_o != _end; ++it_o) {
-        if (*it_o == _open_delim) {
+      size_t i_o    = _p.first;
+      for (; i_o < _s.size_; ++i_o) {
+        if (_s.s_[i_o] == _open_delim) {
           c++;
+          i_o++;
           break;
         }
       }
 
+      if (i_o >= _p.second + 1) return std::nullopt;
+
       // find close
-      Iterator it_e = it_o + 1;
-      for (; it_e != _end; ++it_e) {
+      size_t i_e = i_o;
+      for (; i_e < _p.second; ++i_e) {
         // new nested clause opens
-        if (*it_e == _open_delim) {
+        if (_s.s_[i_e] == _open_delim) {
           c++;
           continue;
         }
 
         // either nested clause closes or we found the end
-        if (*it_e == _close_delim && c == 0) {
-          // end points to end of clause + 1
-          it_e++;
-          break;
-        } else
-          c--;
+        if (_s.s_[i_e] == _close_delim) {
+          if (c == 1) {
+            // end points to end of clause + 1
+            break;
+          } else
+            c--;
+        }
       }
 
-      return {it_o, it_e};
+      return {{i_o, i_e}};
 
-    }  // clause
+    }  // c_clause
+
+    template <size_t Elements, size_t N>
+    [[nodiscard]] consteval auto c_extract_parameters(const sString<N>& _s, const sStringView& _p) {
+      std::array<Parameter, Elements> out;
+      size_t idx       = 0;
+
+      const auto parts = c_split<Elements>(_s, _p, ',');
+
+      for (const auto& rr : parts) {
+        if (!rr) continue;
+        const std::string_view r(&_s.s_[rr->first], rr->second - rr->first);
+        if (r[0] == '$') {
+          const std::optional<uint32_t> val = stn::StrToUInt32(std::string_view(&r[1], r.size() - 1));
+          if (val) { out[idx++] = val.value(); }
+          continue;
+        } else if (r == "true") {
+          out[idx++] = true;
+          continue;
+        } else if (r == "false") {
+          out[idx++] = false;
+          continue;
+        }
+        if (r.contains('.') || r.contains('f')) {
+          const std::optional<float> val = stn::StrToFloat(r);
+          if (val) { out[idx++] = val.value(); }
+        } else {
+          const std::optional<int32_t> val = stn::StrToInt32(r);
+          if (val) { out[idx++] = val.value(); }
+        }
+      }
+      return out;
+    }  // extract_parameters
 
   }  // namespace Util
 
-  namespace Common {
+  namespace H {
 
-    // template <class Iterator>
-    // [[nodiscard]] constexpr inline std::vector<Parameter> extract_parameters(Iterator _begin, Iterator _end) {
-    //   std::vector<std::variant<bool, int32_t, float, uint32_t>> out;
+    // Task($n, ...)[Task($n, ...), ...], ...
+    // Task,
+    // Task[
+    // Task(...),
+    // Task(...)[
 
-    //   size_t last = _ptr;
-    //   for (; _ptr < _s.size(); ++_ptr) {
-    //     const char t = _s[_ptr];
-    //     if (t == ')') break;
-    //   }
+    struct Node {
+      int32_t idx_ = 0;
+    };  // Node
 
-    //   const std::string v(&_s[last], &_s[_ptr]);
-    //   const auto res = split(v, ',');
+    template <size_t Elements, size_t Params>
+    struct NodeHierarchy {
+      std::array<Node, Elements> n_;
+      std::array<std::pair<int32_t, int32_t>, Elements> c_;
+      std::array<std::pair<size_t, std::optional<Parameter>>, Params> p_;
+      size_t c_size_ = 0;
 
-    //   for (const auto& r : res) {
-    //     if (r[0] == '$') {
-    //       const int32_t val = std::stoi(std::string(r.substr(1, r.size() - 1)));
-    //       out.push_back(uint32_t(val));
-    //       continue;
-    //     } else if (r == "true") {
-    //       out.push_back(true);
-    //       continue;
-    //     } else if (r == "false") {
-    //       out.push_back(false);
-    //       continue;
-    //     }
-    //     if (r.contains('.') || r.contains('f')) {
-    //       try {
-    //         const float val = std::stof(std::string(r));
-    //         out.push_back(val);
-    //         continue;
-    //       } catch (std::exception&) {}
-    //     } else {
-    //       try {
-    //         const int32_t val = std::stoi(std::string(r));
-    //         out.push_back(val);
-    //         continue;
-    //       } catch (std::exception&) {}
-    //     }
-    //   }
+      constexpr NodeHierarchy() {
+        for (size_t i = 0; i < Elements; ++i) { n_[i] = Node(); }
+        for (size_t i = 0; i < Elements; ++i) { c_[i] = {0, 0}; }
+        for (size_t i = 0; i < Params; ++i) { p_[i] = {0, std::nullopt}; }
+      }
+    };  // NodeHierarchy
 
-    //   return out;
-    // }  // extract_parameters
+    template <size_t N>
+    [[nodiscard]] consteval size_t c_count(const sString<N>& _s, const sStringView& _p) {
+      if (_s.size_ == 0) return 0;
 
-  }  // namespace Common
+      size_t c      = 1;
 
-  namespace H {}
+      bool in_param = false;
+      for (size_t i = _p.first; i < _p.second; ++i) {
+        switch (_s.s_[i]) {
+          case ',':
+            if (!in_param) c++;
+            break;
+          case '[':
+            c++;
+            break;
+          case ']':
+            if (i + 1 < _s.size_ && _s.s_[i + 1] != ',') c++;
+            break;
+          case '(':
+            in_param = true;
+            break;
+          case ')':
+            in_param = false;
+            break;
+        }
+      }
+
+      return c;
+    }  // c_count
+
+    template <size_t N>
+    [[nodiscard]] consteval size_t c_count_params(const sString<N>& _s, const sStringView& _p) {
+      size_t c      = 0;
+
+      bool in_param = false;
+      for (size_t i = _p.first; i < _p.second; ++i) {
+        switch (_s.s_[i]) {
+          case ',':
+            if (in_param) c++;
+            break;
+          case '(':
+            in_param = true;
+            if (i + 1 < _s.size_ && _s.s_[i + 1] != ')') c++;
+            break;
+          case ')':
+            in_param = false;
+            break;
+        }
+      }
+
+      return c;
+    }  // c_count_params
+
+    /*
+
+    */
+
+    template <size_t Elements, size_t Params, size_t N>
+    [[nodiscard]] consteval NodeHierarchy<Elements, Params> c_extract(const sString<N>& _s, const sStringView& _p) {
+      NodeHierarchy<Elements, Params> out;
+
+      std::vector<int32_t> dd;
+
+      int32_t temp_task_id = 1;
+
+      int32_t level        = 0;
+      bool in_param        = false;
+
+      size_t cur_s         = 0;
+      size_t cur_e         = 1;
+
+      size_t cur_p         = 0;
+
+      for (size_t t = 0; t < Elements; ++t) {
+        // find end
+        for (; cur_e < _s.size_; ++cur_e) {
+          switch (_s.s_[cur_e]) {
+            case '[':
+              level++;
+              break;
+            case ']':
+              level--;
+              break;
+            case ',':
+              break;
+            case '(':
+              in_param = true;
+              break;
+            case ')':
+              in_param = false;
+              break;
+          }
+        }
+
+        const auto clause = Util::c_clause(_s, {cur_s, cur_e}, '(', ')');
+        // has params
+        if (clause) {
+          const size_t s    = Util::c_count_elements(_s, clause.value(), ',');
+          const auto result = Util::c_extract_parameters<s>(_s, clause.value());
+          // for (const auto& p : result) out.p_[cur_p++] = p;
+        }
+      }
+
+      return out;
+    }  // c_extract
+  }  // namespace H
 
   namespace SM {}
 
   namespace BT {
-
-    // [[nodiscard]] inline std::vector<std::shared_ptr<Node>> extract_decorators(
-    //     size_t& _ptr, const std::string& _s, std::shared_ptr<Node> _parent,
-    //     const tsl::robin_map<std::string, int16_t>& _type_to_idx) {
-    //   std::vector<std::shared_ptr<Node>> out;
-    //   size_t last = _ptr;
-    //   for (; _ptr < _s.size(); ++_ptr) {
-    //     const char t = _s[_ptr];
-    //     if (t == '>') break;
-    //   }
-
-    //   const std::string v(&_s[last], &_s[_ptr]);
-    //   const auto res = split(v, ',');
-    //   for (const auto& r : res) {
-    //     size_t brack = r.find_first_of('(', 0);
-
-    //     if (brack != r.npos) {
-    //       std::shared_ptr<Node> d = std::make_shared<Node>();
-    //       d->parent_              = _parent;
-    //       d->type_                = _type_to_idx.at(std::string(&r[0], &r[brack]));
-    //       brack++;
-    //       d->payloads_ = extract_parameters(brack, r);
-    //       out.push_back(std::move(d));
-    //     }
-
-    //     // no payload
-    //     else {
-    //       std::shared_ptr<Node> d = std::make_shared<Node>();
-    //       d->parent_              = _parent;
-    //       d->type_                = _type_to_idx.at(std::string(r));
-    //       out.push_back(std::move(d));
-    //     }
-    //   }
-
-    //   return out;
-    // }  // extract_decorators
 
     // [[nodiscard]] inline std::shared_ptr<Node> extract_node(size_t& _ptr, const std::string& _s,
     //                                                         std::shared_ptr<Node> _parent,

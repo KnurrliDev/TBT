@@ -15,6 +15,10 @@
     State Machine: $[$n: Task($n, ...), ..., $n0->$n1:Task($n, ...), ...]
       $n:     State
       $n->$n: transition
+
+    $[State Machine]
+    sequence[BT]
+
 */
 
 namespace TBT {

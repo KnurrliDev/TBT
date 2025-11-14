@@ -210,48 +210,7 @@ TEST_CASE("count params", "[Hierarchy]") {
 TEST_CASE("node list", "[Hierarchy]") {
   F_SPLIT
   F_CLEAN
-
-  const auto clause = [](const std::string_view& _s, const char _open_delim,
-                         const char _close_delim) -> std::string_view {
-    const char d1 = _open_delim;
-    const char d2 = _close_delim;
-
-    if (!_s.contains(d1) && !_s.contains(d2)) return {};
-
-    int32_t c  = 0;
-
-    /* find open */
-    size_t i_o = 0;
-    for (; i_o < _s.size(); ++i_o) {
-      if (_s[i_o] == _open_delim) {
-        c++;
-        i_o++;
-        break;
-      }
-    }
-
-    if (i_o >= _s.size() + 1) return std::string_view();
-
-    /* find close */
-    size_t i_e = i_o;
-    for (; i_e < _s.size(); ++i_e) { /* new nested clause opens */
-      if (_s[i_e] == _open_delim) {
-        c++;
-        continue;
-      }
-
-      /* either nested clause closes or we found the end */
-      if (_s[i_e] == _close_delim) {
-        if (c == 1) { /* end points to end of clause + 1 */
-          break;
-        } else
-          c--;
-      }
-    }
-
-    return {&_s[i_o], i_e - i_o};
-  };
-
+  F_CLAUSE
   F_PARAMS
   H_COUNT_NODES
 
@@ -277,20 +236,28 @@ TEST_CASE("node list", "[Hierarchy]") {
       return std::nullopt;
     };
 
-    struct SNode {
-      int32_t id_     = 0;
-      int32_t level_  = 0;
-      int32_t parent_ = 0;
-      std::string_view n_;
-      int32_t n_type = 0;  // 0: default, 1: bt, 2:sm
-      int32_t idx_   = 0;
-    };  // SNode
+    /*
+      Grammer:
+        Hierarchy: Task($n, ...)[Task($n, ...), ...]
+          special node: root if no custom root node
+                        root[Task($n, ...)[Task($n, ...), ...], Task($n, ...)]
+
+        Behaviour Tree: sequence[Task($n, ...), Task($n, ...)]
+
+        State Machine: $[$n: Task($n, ...), ..., $n0->$n1:Task($n, ...), ...]
+          $n:     State
+          $n->$n: transition
+
+        $[State Machine]
+        sequence[BT]
+
+    */
 
     /* valid ends: 'Task,', 'Task[' 'Task]', 'Task],' */
-    std::vector<SNode> nodes;
+    std::vector<Node> nodes;
     int32_t idd = 1;
     for (size_t cur_s = 0; cur_s < _s.size(); ++cur_s) { /* find end of current node */
-      // special case: sm
+      /* special case: sm */
       if (_s[cur_s] == '$' && _s[cur_s + 1] == '[') {
         const auto st_cl = clause({&_s[cur_s + 1], _s.size() - cur_s - 1}, '[', ']');
         nodes.emplace_back(idd++, stack.back().first, stack.back().second,
@@ -338,10 +305,9 @@ TEST_CASE("node list", "[Hierarchy]") {
               break;
           }
         }
-        if (next) {
-          // last node is a bt
-          if (nodes.back().n_ == "root" || nodes.back().n_ == "sequence" || nodes.back().n_ == "fallback") {
-            // bt isnt a single node
+        if (next) { /* last node is a bt */
+          if (nodes.back().n_ == "root" || nodes.back().n_ == "sequence" ||
+              nodes.back().n_ == "fallback") { /* bt isnt a single node */
             nodes.back().n_type = 1;
             stack.pop_back();
             nodes.back().idx_ = get_idx_for_type(nodes.back().n_).value();
@@ -545,6 +511,25 @@ TEST_CASE("node list", "[Hierarchy]") {
     REQUIRE(h[10].idx_ == -1);
   }
 }
+
+// TEST_CASE("extract", "[Behaviour Tree]") {
+//   F_SPLIT
+//   F_CLEAN
+//   F_CLAUSE
+//   F_PARAMS
+//   H_COUNT_NODES
+
+//   const std::array<std::pair<int32_t, std::string_view>, 4> variant = {
+//       std::make_pair<int32_t, std::string_view>(-1, "root"), std::make_pair<int32_t, std::string_view>(-2,
+//       "sequence"), std::make_pair<int32_t, std::string_view>(-3, "fallback"), std::make_pair<int32_t,
+//       std::string_view>(1, "Task")};
+
+//   H_EXTRACT
+
+//   const auto bt_extract = [&](const std::string_view& _s) -> std::vector<Node> {
+//     //
+//   };
+// }
 
 // struct TBT_Test {
 //   constexpr static auto tree_ = build<estimate_size("sss")>("sss");

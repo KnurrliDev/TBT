@@ -1,6 +1,7 @@
 #pragma once
 
 #include <TBT/common/defines.hpp>
+#include <TBT/execute/states.hpp>
 #include <TBT/glaze/to_tuple.hpp>
 
 namespace TBT {
@@ -16,16 +17,20 @@ namespace TBT {
     }  // read
 
     template <class T, class U>
-    void write(const T& _val, U* _ptr) {
+    constexpr void write(const T& _val, U* _ptr) {
       static_assert(std::is_trivially_copyable_v<T>, "T must be trivially copyable");
-      memcpy((void*)_ptr, (void*)&_val, sizeof(T));
+      if (std::is_constant_evaluated()) {
+        const auto ar = std::bit_cast<std::array<char, sizeof(T)>>(_val);
+        for (int32_t i = 0; i < sizeof(T); ++i) _ptr[i] = ar[i];
+      } else
+        memcpy((void*)_ptr, (void*)&_val, sizeof(T));
     }  // read
 
     inline States::NodeHeader read_node_header(const char* _node) {
       return read<States::NodeHeader>(_node);
     }  // read_node_header
 
-    inline void write_global_node_header(const States::Header& _val, char* _node) {
+    constexpr inline void write_global_node_header(const States::Header& _val, char* _node) {
       write(_val, _node);
     }  // write_global_node_header
 
@@ -33,7 +38,7 @@ namespace TBT {
       return read<States::Header>(_node);
     }  // read_global_node_header
 
-    inline void write_node_header(const States::NodeHeader& _val, char* _node) {
+    constexpr inline void write_node_header(const States::NodeHeader& _val, char* _node) {
       write(_val, _node);
     }  // read_node_header
 
@@ -43,7 +48,7 @@ namespace TBT {
     }  // read_states
 
     template <class T>
-    void write_node_state(const T& _state, char* _node) {
+    constexpr void write_node_state(const T& _state, char* _node) {
       write<T>(_state, _node + sizeof(States::NodeHeader));
     }  // write_states
 
@@ -51,7 +56,8 @@ namespace TBT {
       return read<uint32_t>(_node + _header.children_offset_ + _i * sizeof(uint32_t));
     }  // read_child
 
-    inline void write_child(const int32_t& _i, const uint32_t _val, const States::NodeHeader& _header, char* _node) {
+    constexpr inline void write_child(const int32_t& _i, const uint32_t _val, const States::NodeHeader& _header,
+                                      char* _node) {
       write<uint32_t>(_val, _node + _header.children_offset_ + _i * sizeof(uint32_t));
     }  // read_child
 
@@ -59,8 +65,8 @@ namespace TBT {
       return read<uint32_t>(_node + _header.decorator_offset_ + _i * sizeof(uint32_t));
     }  // read_decorator
 
-    inline void write_decorator(const int32_t& _i, const uint32_t _val, const States::NodeHeader& _header,
-                                char* _node) {
+    constexpr inline void write_decorator(const int32_t& _i, const uint32_t _val, const States::NodeHeader& _header,
+                                          char* _node) {
       write<uint32_t>(_val, _node + _header.decorator_offset_ + _i * sizeof(uint32_t));
     }  // write_decorator
 
@@ -93,8 +99,8 @@ namespace TBT {
       std::unreachable();
     }  // read_payload
 
-    void write_payload(const int32_t& _i, const std::variant<bool, int32_t, float, uint32_t>& _val,
-                       const States::NodeHeader& _header, char* _node) {
+    constexpr void write_payload(const int32_t& _i, const std::variant<bool, int32_t, float, uint32_t>& _val,
+                                 const States::NodeHeader& _header, char* _node) {
       constexpr int32_t size = sizeof(char) + sizeof(int32_t);
       Detail::Payload pl;
       char type = 0;
@@ -228,8 +234,8 @@ namespace TBT {
     }  // alloc_task
 
     template <class State>
-    Execute::States::NodeHeader create_node_header(const int16_t _vidx, const int16_t _children_count,
-                                                   const int16_t _decorator_count, const int16_t _payload_count) {
+    States::NodeHeader create_node_header(const int16_t _vidx, const int16_t _children_count,
+                                          const int16_t _decorator_count, const int16_t _payload_count) {
       Execute::States::NodeHeader header;
 
       header.vidx_             = _vidx;

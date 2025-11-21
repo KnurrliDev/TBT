@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <expected>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -45,6 +46,15 @@ namespace TBT {
     };
 
   }  // namespace Detail
+
+  // helper type for the visitor #4
+  template <class... Ts>
+  struct overloaded : Ts... {
+    using Ts::operator()...;
+  };
+  // explicit deduction guide (not needed as of C++20)
+  template <class... Ts>
+  overloaded(Ts...) -> overloaded<Ts...>;
 
 #define ENABLE_TBT_TYPENAME(A, B)                    \
   template <>                                        \

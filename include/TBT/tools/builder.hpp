@@ -2,7 +2,7 @@
 
 #include <TBT/common/defines.hpp>
 #include <TBT/common/static_string.hpp>
-#include <TBT/execute/states.hpp>
+#include <TBT/execute/helper.hpp>
 
 /*
   Grammer:
@@ -216,7 +216,7 @@ const auto clean = [](std::string _in) -> std::string {                   \
     bool in_param        = false;                                                                 \
                                                                                                   \
     std::vector<std::pair<int32_t, int32_t>> stack;                                               \
-    stack.push_back({0, 0});                                                                      \
+    stack.push_back({0, -1});                                                                     \
                                                                                                   \
     const auto get_idx_for_type = [&](const std::string_view& _ss) -> std::optional<size_t> {     \
       const auto t = _ss.substr(0, _ss.find_first_of('('));                                       \
@@ -324,13 +324,11 @@ const auto clean = [](std::string _in) -> std::string {                   \
 
   // clang-format on
 
-  using Parameter = std::variant<bool, int32_t, float, uint32_t>;
-
   struct Node {
     int32_t node_id_  = 0;
     int32_t type_idx_ = 0;
     int32_t level_    = 0;
-    int32_t parent_   = 0;
+    int32_t parent_   = -1;
     std::vector<Parameter> p_;
     std::string_view cl_;
     //---------------------

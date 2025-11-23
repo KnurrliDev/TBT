@@ -1,6 +1,6 @@
 // This black macro magic was conjured up by https://github.com/JacksonAllan
 
-// #include <TBT/common/defines.hpp>
+#include <TBT/defines.hpp>
 
 // Check for correct use.
 #if !defined(TASK_TYPE)

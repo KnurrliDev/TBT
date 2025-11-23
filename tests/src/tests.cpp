@@ -1,10 +1,10 @@
 #include <TBT/TBT>
-#include <TBT/common/defines.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <iomanip>
 #include <iostream>
 
 using namespace TBT;
+using namespace Compiler;
 
 TEST_CASE("string splitting", "[util]") {
   F_SPLIT
@@ -197,18 +197,6 @@ TEST_CASE("count nodes", "[Hierarchy]") {
   }
 }
 
-TEST_CASE("count params", "[Hierarchy]") {
-  F_CLEAN
-  H_COUNT_PARAMS
-
-  const std::string input = "Task(true), Task(true, true)[Task, Task, Task(true)] Task";
-  const std::string res   = clean(input);
-
-  const size_t h          = h_count_params({res.data(), res.size()});
-
-  REQUIRE(h == 4);
-}
-
 TEST_CASE("node list", "[Hierarchy]") {
   F_SPLIT
   F_CLEAN
@@ -351,282 +339,74 @@ TEST_CASE("static node list", "[Hierarchy]") {
 }
 
 struct TaskA {};
-ENABLE_TBT_TYPENAME(TaskA, "TaskA")
+#define TASK_TYPE TaskA
+#include <TBT/magic.hpp>
 
 struct TaskB {};
-ENABLE_TBT_TYPENAME(TaskB, "TaskB")
+#define TASK_TYPE TaskB
+#include <TBT/magic.hpp>
 
 struct TaskC {};
-ENABLE_TBT_TYPENAME(TaskC, "TaskC")
+#define TASK_TYPE TaskC
+#include <TBT/magic.hpp>
 
-template <typename Variant>
-consteval auto variant_type_index_name_pairs() {
-  using V            = std::remove_cvref_t<Variant>;
-  constexpr size_t N = std::variant_size_v<V>;
-  return []<size_t... I>(std::index_sequence<I...>) consteval {
-    using tuple_t = std::pair<size_t, std::string_view>;
-    return std::array<tuple_t, N>{{tuple_t{I, Detail::TypeName<std::variant_alternative_t<I, V>>::Get()}...}};
-  }(std::make_index_sequence<N>{});
-}  // variant_type_index_name_pairs
-
-template <class Variant>
-constexpr size_t compute_size_static(const std::string_view& _s) {
-  F_SPLIT
-  F_CLEAN
-  F_CLAUSE
-  F_PARAMS
-
-  constexpr auto variant = variant_type_index_name_pairs<Variant>();
-
-  H_EXTRACT
-
-  const auto gather_children = [](const int32_t _parent, const std::vector<Node>& _nodes) -> std::vector<int32_t> {
-    std::vector<int32_t> out;
-    for (const auto& n : _nodes)
-      if (n.parent_ == _parent) out.push_back(n.node_id_);
-    return out;
-  };
-
-  // clean input
-  const std::string s      = clean(std::string(_s));
-
-  // extract nodes
-  const auto hh            = h_extract({s.data(), s.size()});
-
-  const auto nodes         = hh.value();
-
-  //----------------------------------------------------
-  // ...|header|node header|children|params|composite|...
-
-  const auto root_children = gather_children(-1, nodes);
-
-  size_t out               = sizeof(States::Header) + root_children.size() * sizeof(uint32_t);
-
-  for (const Node& n : nodes) {
-    const auto children = gather_children(n.node_id_, nodes);
-    out += (uint32_t)sizeof(States::NodeHeader) + (uint16_t)children.size() * sizeof(int32_t) +
-           (uint16_t)n.p_.size() * (1 + sizeof(int32_t)) + sizeof(States::Composite);
-  }
-
-  return out;
-};  // compute_size_static
-
-template <class Variant, class Array>
-constexpr void flatten(const std::string_view& _s, Array& _vals) {
-  F_SPLIT
-  F_CLEAN
-  F_CLAUSE
-  F_PARAMS
-
-  constexpr auto variant = variant_type_index_name_pairs<Variant>();
-
-  H_EXTRACT
-
-  const auto gather_children = [](const int32_t _parent, const std::vector<Node>& _nodes) -> std::vector<int32_t> {
-    std::vector<int32_t> out;
-    for (const auto& n : _nodes)
-      if (n.parent_ == _parent) out.push_back(n.node_id_);
-    return out;
-  };
-
-  // clean input
-  const std::string s      = clean(std::string(_s));
-
-  // extract nodes
-  const auto hh            = h_extract({s.data(), s.size()});
-
-  auto nodes               = hh.value();
-
-  //----------------------------------------------------
-  // ...|header|node header|children|params|composite|...
-
-  const auto root_children = gather_children(-1, nodes);
-
-  States::Header header;
-  header.node_count_        = nodes.size();
-  header.ptr_               = 0;
-  header.node_count_        = (uint16_t)nodes.size();
-  header.children_count_    = (uint16_t)root_children.size();
-  header.first_node_offset_ = sizeof(States::Header) + header.children_count_ * sizeof(uint32_t);
-
-  // write global header
-  auto ha                   = std::bit_cast<std::array<int8_t, sizeof(States::Header)>>(header);
-  for (size_t i = 0; i < sizeof(States::Header); ++i) _vals[i] = ha[i];
-
-  uint32_t ptr = header.first_node_offset_;
-  for (Node& n : nodes) {
-    States::NodeHeader header;
-    header.type_idx_        = n.type_idx_;
-    header.parent_          = n.parent_;
-
-    const auto children     = gather_children(n.node_id_, nodes);
-    header.children_count_  = (uint16_t)children.size();
-    header.children_offset_ = ptr + (uint32_t)sizeof(States::NodeHeader);
-
-    header.params_count_    = (uint16_t)n.p_.size();
-    header.params_offset_   = header.children_offset_ + header.children_count_ * sizeof(int32_t);
-
-    header.comp_offset_     = header.params_offset_ + header.params_count_ * (1 + sizeof(int32_t));
-
-    header.node_size_       = header.comp_offset_ + sizeof(States::Composite) - ptr;
-
-    n.offset_               = ptr;
-    n.size_                 = header.node_size_;
-
-    // write header
-    const auto nha          = std::bit_cast<std::array<int8_t, sizeof(States::NodeHeader)>>(header);
-    for (size_t i = 0; i < sizeof(States::NodeHeader); ++i) _vals[ptr + i] = nha[i];
-
-    // write params (5 bytes per param)
-    for (size_t i = 0; i < n.p_.size(); ++i) {
-      const auto& p       = n.p_[i];
-      const size_t offset = header.params_offset_ + i * (1 + sizeof(int32_t));
-      std::visit(overloaded(
-                     [&](const bool _p) {
-                       const auto pa     = std::bit_cast<std::array<int8_t, sizeof(int32_t)>>((int32_t)_p);
-                       _vals[offset]     = pt_bool;
-                       _vals[offset + 1] = pa[0];
-                       for (int32_t i = 1; i < sizeof(int32_t); ++i) _vals[offset + 1 + i] = 0x0;
-                     },
-                     [&](const int32_t _p) {
-                       const auto pa = std::bit_cast<std::array<int8_t, sizeof(int32_t)>>(_p);
-                       _vals[offset] = pt_int;
-                       for (int32_t i = 0; i < sizeof(int32_t); ++i) _vals[offset + 1 + i] = pa[i];
-                     },
-                     [&](const float _p) {
-                       const auto pa = std::bit_cast<std::array<int8_t, sizeof(float)>>(_p);
-                       _vals[offset] = pt_float;
-                       for (int32_t i = 0; i < sizeof(float); ++i) _vals[offset + 1 + i] = pa[i];
-                     },
-                     [&](const uint32_t _p) {
-                       const auto pa = std::bit_cast<std::array<int8_t, sizeof(uint32_t)>>(_p);
-                       _vals[offset] = pt_dyn;
-                       for (int32_t i = 0; i < sizeof(uint32_t); ++i) _vals[offset + 1 + i] = pa[i];
-                     }),
-                 p);
-    }
-
-    States::Composite cmp;
-    cmp.cur_idx_ = 0;
-    cmp.ptr_     = 0;
-
-    auto cmpa    = std::bit_cast<std::array<int8_t, sizeof(States::Composite)>>(cmp);
-    for (size_t i = 0; i < sizeof(States::Composite); ++i) _vals[header.comp_offset_ + i] = cmpa[i];
-
-    ptr += header.node_size_;
-  }
-
-  // link root children
-  int32_t cc = 0;
-  for (const int32_t id : root_children) {
-    const uint32_t offset = sizeof(States::Header) + cc * sizeof(uint32_t);
-
-    for (const Node& n : nodes) {
-      if (id == n.node_id_) {
-        auto cmpa = std::bit_cast<std::array<int8_t, sizeof(int32_t)>>(n.offset_);
-        for (size_t i = 0; i < sizeof(int32_t); ++i) _vals[offset + i] = cmpa[i];
-        break;
-      }
-    }
-
-    cc++;
-  }
-
-  // link children
-  for (const Node& n : nodes) {
-    const uint32_t c_ptr = n.offset_ + (uint32_t)sizeof(States::NodeHeader);
-
-    const auto children  = gather_children(n.node_id_, nodes);
-    for (size_t i = 0; i < children.size(); ++i) {
-      // find node with id
-      for (const auto& nc : nodes) {
-        if (nc.node_id_ == children[i]) {
-          // write children (4 bytes per child)
-          const auto ca = std::bit_cast<std::array<char, sizeof(int32_t)>>(nc.offset_);
-          for (int32_t j = 0; j < sizeof(int32_t); ++j) _vals[c_ptr + i * sizeof(int32_t) + j] = ca[j];
-
-          break;
-        }
-      }
-    }
-  }
-};
-
-template <class Variant>
-[[nodiscard]] std::vector<int8_t> flatten_dynamic(const std::string_view& _s) {
-  std::vector<int8_t> out;
-  out.resize(compute_size_static<Variant>(_s), 0x0);
-  flatten<Variant>(_s, out);
-  return out;
-}  // flatten_dynamic
-
-template <size_t S, class Variant>
-consteval std::array<int8_t, S> flatten_static(const std::string_view& _s) {
-  std::array<int8_t, S> out;
-  for (size_t i = 0; i < S; ++i) out[i] = 0x0;
-  flatten<Variant>(_s, out);
-  return out;
-}  // flatten_static
+using Variant = std::variant<TASK_TYPES>;
 
 TEST_CASE("dynamic extract node list", "[Composite]") {
-  using Variant                = std::variant<TaskA, TaskB, TaskC>;
-
   constexpr auto vr            = variant_type_index_name_pairs<Variant>();
 
   constexpr std::string_view s = "TaskA($1)[TaskB($2), TaskC($3)] TaskA($4)";
-  // constexpr size_t r_size      = compute_size_static<Variant>(s);
-  // constexpr auto res           = flatten_static<r_size, Variant>(s);
 
-  const auto res               = flatten_dynamic<Variant>(s);
+  const auto res               = compile_dynamic<Variant>(s);
 
-  const States::Header gh      = Execute::read_global_node_header(res.data());
+  const Header gh              = read_global_node_header(res.data());
   REQUIRE(gh.node_count_ == 4);
   REQUIRE(gh.children_count_ == 2);
 
-  const uint32_t rc0          = Execute::read_root_child(0, res.data());
-  const uint32_t rc1          = Execute::read_root_child(1, res.data());
+  const uint32_t rc0  = read_root_child(0, res.data());
+  const uint32_t rc1  = read_root_child(1, res.data());
 
-  const States::NodeHeader n1 = Execute::read_node_header(res.data() + rc0);
+  const NodeHeader n1 = read_node_header(res.data() + rc0);
   REQUIRE(n1.type_idx_ == 0);
   REQUIRE(n1.children_count_ == 2);
   REQUIRE(n1.parent_ == -1);
   {
-    const auto pl = Execute::read_payload(0, n1, res.data());
+    const auto pl = read_payload(0, n1, res.data());
     REQUIRE(pl.index() == 3);
     REQUIRE(std::get<3>(pl) == 1);
   }
 
-  const uint32_t c11          = Execute::read_child(0, n1, res.data());
-  const uint32_t c12          = Execute::read_child(1, n1, res.data());
+  const uint32_t c11  = read_child(0, n1, res.data());
+  const uint32_t c12  = read_child(1, n1, res.data());
 
-  const States::NodeHeader n2 = Execute::read_node_header(res.data() + c11);
+  const NodeHeader n2 = read_node_header(res.data() + c11);
   REQUIRE(n2.type_idx_ == 1);
   REQUIRE(n2.children_count_ == 0);
   REQUIRE(n2.parent_ == 1);
   {
-    const auto pl = Execute::read_payload(0, n2, res.data());
+    const auto pl = read_payload(0, n2, res.data());
     REQUIRE(pl.index() == 3);
     REQUIRE(std::get<3>(pl) == 2);
   }
 
-  const States::NodeHeader n3 = Execute::read_node_header(res.data() + c12);
+  const NodeHeader n3 = read_node_header(res.data() + c12);
   REQUIRE(n3.type_idx_ == 2);
   REQUIRE(n3.children_count_ == 0);
   REQUIRE(n3.parent_ == 1);
   {
-    const auto pl = Execute::read_payload(0, n3, res.data());
+    const auto pl = read_payload(0, n3, res.data());
     REQUIRE(pl.index() == 3);
     REQUIRE(std::get<3>(pl) == 3);
   }
 
   //-----------------------------------------
 
-  const States::NodeHeader n4 = Execute::read_node_header(res.data() + rc1);
+  const NodeHeader n4 = read_node_header(res.data() + rc1);
   REQUIRE(n4.type_idx_ == 0);
   REQUIRE(n4.children_count_ == 0);
   REQUIRE(n4.parent_ == -1);
   {
-    const auto pl = Execute::read_payload(0, n4, res.data());
+    const auto pl = read_payload(0, n4, res.data());
     REQUIRE(pl.index() == 3);
     REQUIRE(std::get<3>(pl) == 4);
   }
@@ -639,73 +419,62 @@ TEST_CASE("static extract node list", "[Composite]") {
 
   constexpr std::string_view s = "TaskA($1)[TaskB($2), TaskC($3)] TaskA($4)";
   constexpr size_t r_size      = compute_size_static<Variant>(s);
-  constexpr auto res           = flatten_static<r_size, Variant>(s);
+  constexpr auto res           = compile_static<r_size, Variant>(s);
 
-  const auto res1              = flatten_dynamic<Variant>(s);
-
-  // for (size_t i = 0; i < res.size(); ++i)
-  //   std::cout << " 0x" << std::setw(2) << std::setfill('0') << std::hex << (int)res[i];
-
-  // std::cout << std::endl << std::endl;
-
-  // for (size_t i = 0; i < res1.size(); ++i)
-  //   std::cout << " 0x" << std::setw(2) << std::setfill('0') << std::hex << (int)res1[i];
+  const auto res1              = compile_dynamic<Variant>(s);
 
   REQUIRE(res.size() == res1.size());
 
-  for (size_t i = 0; i < res.size(); ++i) {
-    REQUIRE(res[i] == res1[i]);
-    // std::cout << i << std::endl;
-  }
+  for (size_t i = 0; i < res.size(); ++i) { REQUIRE(res[i] == res1[i]); }
 
-  const States::Header gh = Execute::read_global_node_header(res.data());
+  const Header gh = read_global_node_header(res.data());
   REQUIRE(gh.node_count_ == 4);
   REQUIRE(gh.children_count_ == 2);
 
-  const uint32_t rc0          = Execute::read_root_child(0, res.data());
-  const uint32_t rc1          = Execute::read_root_child(1, res.data());
+  const uint32_t rc0  = read_root_child(0, res.data());
+  const uint32_t rc1  = read_root_child(1, res.data());
 
-  const States::NodeHeader n1 = Execute::read_node_header(res.data() + rc0);
+  const NodeHeader n1 = read_node_header(res.data() + rc0);
   REQUIRE(n1.type_idx_ == 0);
   REQUIRE(n1.children_count_ == 2);
   REQUIRE(n1.parent_ == -1);
   {
-    const auto pl = Execute::read_payload(0, n1, res.data());
+    const auto pl = read_payload(0, n1, res.data());
     REQUIRE(pl.index() == 3);
     REQUIRE(std::get<3>(pl) == 1);
   }
 
-  const uint32_t c11          = Execute::read_child(0, n1, res.data());
-  const uint32_t c12          = Execute::read_child(1, n1, res.data());
+  const uint32_t c11  = read_child(0, n1, res.data());
+  const uint32_t c12  = read_child(1, n1, res.data());
 
-  const States::NodeHeader n2 = Execute::read_node_header(res.data() + c11);
+  const NodeHeader n2 = read_node_header(res.data() + c11);
   REQUIRE(n2.type_idx_ == 1);
   REQUIRE(n2.children_count_ == 0);
   REQUIRE(n2.parent_ == 1);
   {
-    const auto pl = Execute::read_payload(0, n2, res.data());
+    const auto pl = read_payload(0, n2, res.data());
     REQUIRE(pl.index() == 3);
     REQUIRE(std::get<3>(pl) == 2);
   }
 
-  const States::NodeHeader n3 = Execute::read_node_header(res.data() + c12);
+  const NodeHeader n3 = read_node_header(res.data() + c12);
   REQUIRE(n3.type_idx_ == 2);
   REQUIRE(n3.children_count_ == 0);
   REQUIRE(n3.parent_ == 1);
   {
-    const auto pl = Execute::read_payload(0, n3, res.data());
+    const auto pl = read_payload(0, n3, res.data());
     REQUIRE(pl.index() == 3);
     REQUIRE(std::get<3>(pl) == 3);
   }
 
   //-----------------------------------------
 
-  const States::NodeHeader n4 = Execute::read_node_header(res.data() + rc1);
+  const NodeHeader n4 = read_node_header(res.data() + rc1);
   REQUIRE(n4.type_idx_ == 0);
   REQUIRE(n4.children_count_ == 0);
   REQUIRE(n4.parent_ == -1);
   {
-    const auto pl = Execute::read_payload(0, n4, res.data());
+    const auto pl = read_payload(0, n4, res.data());
     REQUIRE(pl.index() == 3);
     REQUIRE(std::get<3>(pl) == 4);
   }

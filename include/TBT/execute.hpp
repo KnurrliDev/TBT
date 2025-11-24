@@ -158,7 +158,7 @@ namespace TBT::Execute {
     return v;
   }  // alloc_task
 
-  template <class NodeTypes, class StateProvider, class... Ts>
+  template <class Variant, class StateProvider, class... Ts>
   State execute_task(uint8_t* _tree, Compiler::Header& _global_header, const Compiler::NodeHeader& _header,
                      StateProvider& _states, const std::tuple<Ts...>& _params) {
     using namespace Compiler;
@@ -193,7 +193,7 @@ namespace TBT::Execute {
       // add offset to dynamic params
       for (const int32_t i : d_ics) idcs[i] += (uint32_t)payloads.size();
 
-      NodeTypes* state = alloc_task<NodeTypes>(_header.type_idx_, idcs, payloads, _params);
+      Variant* state = alloc_task<Variant>(_header.type_idx_, idcs, payloads, _params);
 
       // run the task
       {
@@ -302,9 +302,9 @@ namespace TBT::Execute {
 
       // keep running the task
       assert(task.ptr_ != 0);
-      NodeTypes* state = reinterpret_cast<NodeTypes*>(task.ptr_);
+      Variant* state = reinterpret_cast<Variant*>(task.ptr_);
 
-      State res        = FAILED;
+      State res      = FAILED;
       std::visit(
           [&](auto& _t) {
             if constexpr (Concepts::has_run_sig_1<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
@@ -343,7 +343,7 @@ namespace TBT::Execute {
     return BUSY;
   }  // execute_task
 
-  template <class NodeTypes, class Tree, class StateProvider, class... Ts>
+  template <class Variant, class Tree, class StateProvider, class... Ts>
   State execute_step(Tree& _tree, StateProvider&& _states, const std::tuple<Ts...>& _params) {
     // static_assert(std::is_same_v<Tree, DynamicTree> || std::is_same_v<Tree, StaticTree>);
 
@@ -363,8 +363,8 @@ namespace TBT::Execute {
     // read header of current node
     const NodeHeader cur_node_header = read_node_header(_tree.data() + global_header.ptr_);
 
-    assert(cur_node_header.type_idx_ >= 0 || cur_node_header.type_idx_ < std::variant_size_v<NodeTypes>);
-    execute_task<NodeTypes>(_tree.data(), global_header, cur_node_header, _states, _params);
+    assert(cur_node_header.type_idx_ >= 0 || cur_node_header.type_idx_ < std::variant_size_v<Variant>);
+    execute_task<Variant>(_tree.data(), global_header, cur_node_header, _states, _params);
 
     // check if returned to root
     if (global_header.last_result_.dir_ == UP && global_header.ptr_ == 0) {
@@ -395,11 +395,11 @@ namespace TBT::Execute {
   }  // execute
 
   // prepares for the execution of a tree
-  template <class NodeTypes, class StateProvider, class... Ts>
-  std::function<State()> prepare(std::string _tree, StateProvider&& _states, Ts... _ts) {
+  template <class Variant, class Tree, class StateProvider, class... Ts>
+  [[noidscard]] std::function<State()> prepare(Tree _tree, StateProvider& _states, Ts... _ts) {
     return
         [tree = std::move(_tree), states = std::ref(_states), params = std::make_tuple(std::move(_ts)...)]() -> State {
-          return execute_step<NodeTypes>(*const_cast<std::string*>(&tree), states.get(), params);
+          return execute_step<Variant>(*const_cast<Tree*>(&tree), states.get(), params);
         };
   }  // prepare
 

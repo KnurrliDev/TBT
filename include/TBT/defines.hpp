@@ -17,6 +17,7 @@
 #include <expected>
 #include <filesystem>
 #include <format>
+#include <forward_list>
 #include <fstream>
 #include <functional>
 #include <future>
@@ -98,13 +99,4 @@ namespace TBT {
 
   }  // namespace Detail
 
-  template <typename Variant>
-  consteval auto variant_type_index_name_pairs() {
-    using V            = std::remove_cvref_t<Variant>;
-    constexpr size_t N = std::variant_size_v<V>;
-    return []<size_t... I>(std::index_sequence<I...>) consteval {
-      using tuple_t = std::pair<size_t, std::string_view>;
-      return std::array<tuple_t, N>{{tuple_t{I, Detail::TypeName<std::variant_alternative_t<I, V>>::Get()}...}};
-    }(std::make_index_sequence<N>{});
-  }  // variant_type_index_name_pairs
 }  // namespace TBT

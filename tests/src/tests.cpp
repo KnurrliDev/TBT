@@ -451,7 +451,7 @@ void exit(const TaskC& _t, States& _s) {
   _s.t_.push_back(std::format("exit [{}]", _t.val_));
 }
 
-TEST_CASE("single task", "[Execute]") {
+TEST_CASE("hierarchy", "[Execute]") {
   using Variant                = std::variant<TaskA, TaskB, TaskC>;
 
   constexpr auto vr            = variant_type_index_name_pairs<Variant>();
@@ -497,4 +497,36 @@ TEST_CASE("single task", "[Execute]") {
   REQUIRE("run [3]" == states.t_[i++]);
   REQUIRE("run [3]" == states.t_[i++]);
   REQUIRE("exit [3]" == states.t_[i++]);
+}
+
+template <class Variant_>
+struct StateProvider {
+  using Variant = Variant_;
+  std::vector<std::string> t_;
+
+  TaskQueue tasks_queue_;
+};
+
+TEST_CASE("prepare", "[Execute]") {
+  using Variant                = std::variant<TaskA, TaskB, TaskC>;
+
+  constexpr auto vr            = variant_type_index_name_pairs<Variant>();
+
+  constexpr std::string_view s = "TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]";
+
+  StateProvider<Variant> states;
+
+  const auto prep  = Execute::prepare<Variant>(compile_static<compute_size_static<Variant>(s), Variant>(s), states, -5);
+
+  const auto prep0 = Execute::prepare<typename decltype(states)::Variant>(
+      compile_static<compute_size_static<typename decltype(states)::Variant>(s), typename decltype(states)::Variant>(s),
+      states, -5);
+
+  const auto prep1 = COMPILE_AND_PREPARE(s, states, -5);
+  const auto prep2 = COMPILE_AND_PREPARE("TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]", states, -5);
+
+  const auto [promise, tree_ptr] =
+      COMPILE_AND_QUEUE("TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]", states, -5);
+
+  while (true) { EXECUTE_QUEUE(states) }
 }

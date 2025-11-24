@@ -197,13 +197,12 @@ namespace TBT::Execute {
 
       // run the task
       {
-        State res = FAILED;
-        std::visit(
+        const State res = std::visit(
             [&](auto& _t) {
               if constexpr (Concepts::has_init_sig_1<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
-                res = run(_t, _states);
+                return init(_t, _states);
               else if constexpr (Concepts::has_init_sig_2<std::decay_t<decltype(_t)>>)
-                res = run(_t);
+                return init(_t);
               // else
               //   static_assert(false, "no signature found");
             },
@@ -231,13 +230,12 @@ namespace TBT::Execute {
 
       // the task succeeded. check if wait exists, else return
       {
-        std::optional<State> res;
-        std::visit(
+        const std::optional<State> res = std::visit(
             [&](auto& _t) {
               if constexpr (Concepts::has_run_sig_1<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
-                res = wait(_t, _states);
+                return run(_t, _states);
               else if constexpr (Concepts::has_run_sig_2<std::decay_t<decltype(_t)>>)
-                res = wait(_t);
+                return run(_t);
             },
             *state);
 
@@ -262,9 +260,11 @@ namespace TBT::Execute {
             _global_header.ptr_              = _header.parent_;
             _global_header.last_result_.dir_ = UP;
           } else {
-            task.cur_idx_;
-            _global_header.ptr_              = read_child(task.cur_idx_, _header, _tree);
+            const uint32_t optr              = read_child(task.cur_idx_, _header, _tree);
             _global_header.last_result_.dir_ = DOWN;
+            task.cur_idx_++;
+            write_composite(task, _header, _tree);
+            _global_header.ptr_ = optr;
           }
 
           // either wait has returned a state or the state must be success from run
@@ -286,9 +286,18 @@ namespace TBT::Execute {
     else {
       // returning from a child. go to next or return to parent
       if (_global_header.last_result_.state_ != State::BUSY) {
-        // task.cur_idx_;
-        _global_header.ptr_              = read_child(task.cur_idx_, _header, _tree);
-        _global_header.last_result_.dir_ = DOWN;
+        if (task.cur_idx_ >= _header.children_count_) {
+          task.cur_idx_                    = 0;
+          _global_header.ptr_              = _header.parent_;
+          _global_header.last_result_.dir_ = UP;
+        } else {
+          const uint32_t optr              = read_child(task.cur_idx_, _header, _tree);
+          _global_header.last_result_.dir_ = DOWN;
+          task.cur_idx_++;
+          write_composite(task, _header, _tree);
+          _global_header.ptr_ = optr;
+        }
+        return _global_header.last_result_.state_;
       }
 
       // keep running the task
@@ -299,9 +308,9 @@ namespace TBT::Execute {
       std::visit(
           [&](auto& _t) {
             if constexpr (Concepts::has_run_sig_1<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
-              res = wait(_t, _states);
+              res = run(_t, _states);
             else if constexpr (Concepts::has_run_sig_2<std::decay_t<decltype(_t)>>)
-              res = wait(_t);
+              res = run(_t);
           },
           *state);
 
@@ -334,9 +343,9 @@ namespace TBT::Execute {
     return BUSY;
   }  // execute_task
 
-  template <class Tree, class NodeTypes, class StateProvider, class... Ts>
+  template <class NodeTypes, class Tree, class StateProvider, class... Ts>
   State execute_step(Tree& _tree, StateProvider&& _states, const std::tuple<Ts...>& _params) {
-    static_assert(std::is_same_v<Tree, DynamicTree> || std::is_same_v<Tree, StaticTree>);
+    // static_assert(std::is_same_v<Tree, DynamicTree> || std::is_same_v<Tree, StaticTree>);
 
     using namespace Compiler;
 
@@ -352,13 +361,15 @@ namespace TBT::Execute {
     }
 
     // read header of current node
-    const NodeHeader cur_node_header = read_node_header(global_header.ptr_, _tree.data());
+    const NodeHeader cur_node_header = read_node_header(_tree.data() + global_header.ptr_);
 
-    assert(cur_node_header.vidx_ >= 0 || cur_node_header.vidx_ < std::variant_size_v<NodeTypes>);
+    assert(cur_node_header.type_idx_ >= 0 || cur_node_header.type_idx_ < std::variant_size_v<NodeTypes>);
     execute_task<NodeTypes>(_tree.data(), global_header, cur_node_header, _states, _params);
 
     // check if returned to root
     if (global_header.last_result_.dir_ == UP && global_header.ptr_ == 0) {
+      global_header.child_idx_++;
+
       // the last task was executed. the tree is done
       if (global_header.child_idx_ >= global_header.children_count_) {
         // reset the tree
@@ -370,14 +381,15 @@ namespace TBT::Execute {
       }
       // proceed to next child
       else {
-        global_header.ptr_ = read_root_child(global_header.child_idx_, _tree.data());
-        global_header.child_idx_++;
+        global_header.ptr_              = read_root_child(global_header.child_idx_, _tree.data());
+
         global_header.last_result_.dir_ = DOWN;
         write_global_node_header(global_header, _tree.data());
         return BUSY;
       }
     }
 
+    write_global_node_header(global_header, _tree.data());
     return BUSY;
 
   }  // execute

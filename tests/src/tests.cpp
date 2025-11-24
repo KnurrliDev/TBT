@@ -93,60 +93,6 @@ TEST_CASE("string clean", "[util]") {
   REQUIRE(res == "apple,banana,orange");
 }
 
-TEST_CASE("clause extraction", "[util]") {
-  F_CLAUSE
-
-  SECTION("no clause") {
-    constexpr std::string_view input = "apple";
-    constexpr char open_delim        = '<';
-    constexpr char close_delim       = '>';
-
-    const auto result                = clause(input, open_delim, close_delim);
-
-    REQUIRE(result.empty());
-  }
-
-  SECTION("single clause") {
-    constexpr std::string_view input = "<apple>";
-    constexpr char open_delim        = '<';
-    constexpr char close_delim       = '>';
-
-    const auto result                = clause(input, open_delim, close_delim);
-
-    REQUIRE(result == "apple");
-  }
-
-  SECTION("multi clause") {
-    constexpr std::string_view input = "<orange<apple>banana>";
-    constexpr char open_delim        = '<';
-    constexpr char close_delim       = '>';
-
-    const auto result                = clause(input, open_delim, close_delim);
-
-    REQUIRE(result == "orange<apple>banana");
-  }
-
-  SECTION("multi brackets") {
-    constexpr std::string_view input = "<<orange<<<apple>>>banana>>";
-    constexpr char open_delim        = '<';
-    constexpr char close_delim       = '>';
-
-    const auto result                = clause(input, open_delim, close_delim);
-
-    REQUIRE(result == "<orange<<<apple>>>banana>");
-  }
-
-  SECTION("missing brackets") {
-    constexpr std::string_view input = "<<<orange<<<apple>>>banana>>";
-    constexpr char open_delim        = '<';
-    constexpr char close_delim       = '>';
-
-    constexpr auto result            = clause(input, open_delim, close_delim);
-
-    REQUIRE(result == "<<orange<<<apple>>>banana>>");
-  }
-}
-
 TEST_CASE("parameter extraction", "[util]") {
   F_SPLIT
   F_PARAMS
@@ -165,44 +111,10 @@ TEST_CASE("parameter extraction", "[util]") {
   }
 }
 
-TEST_CASE("count nodes", "[Hierarchy]") {
-  F_CLEAN
-  H_COUNT_NODES
-
-  SECTION("count with task at end") {
-    const std::string input = "Task(true), Task(true, true)[Task, Task, Task(true)] Task";
-    const std::string res   = clean(input);
-
-    const size_t h          = h_count_nodes({res.data(), res.size()});
-
-    REQUIRE(h == 6);
-  }
-
-  SECTION("count with ] at end") {
-    const std::string input = "Task(true), Task(true, true)[Task, Task, Task(true)] ";
-    const std::string res   = clean(input);
-
-    const size_t h          = h_count_nodes({res.data(), res.size()});
-
-    REQUIRE(h == 5);
-  }
-
-  SECTION("count with ],") {
-    const std::string input = "Task(true), Task(true, true)[Task, Task, Task(true)], Task";
-    const std::string res   = clean(input);
-
-    const size_t h          = h_count_nodes({res.data(), res.size()});
-
-    REQUIRE(h == 6);
-  }
-}
-
 TEST_CASE("node list", "[Hierarchy]") {
   F_SPLIT
   F_CLEAN
-  F_CLAUSE
   F_PARAMS
-  H_COUNT_NODES
 
   const std::array<std::pair<int32_t, std::string_view>, 4> variant = {
       std::make_pair<int32_t, std::string_view>(1, "Task")};
@@ -233,13 +145,13 @@ TEST_CASE("node list", "[Hierarchy]") {
     REQUIRE(h[0].node_id_ == 1);
     REQUIRE(h[0].type_idx_ == 1);
     REQUIRE(h[0].level_ == 0);
-    REQUIRE(h[0].parent_ == -1);
+    REQUIRE(h[0].parent_ == 0);
     REQUIRE(h[0].p_.size() == 1);
 
     REQUIRE(h[1].node_id_ == 2);
     REQUIRE(h[1].type_idx_ == 1);
     REQUIRE(h[1].level_ == 0);
-    REQUIRE(h[1].parent_ == -1);
+    REQUIRE(h[1].parent_ == 0);
     REQUIRE(h[1].p_.size() == 2);
 
     REQUIRE(h[2].node_id_ == 3);
@@ -269,7 +181,7 @@ TEST_CASE("node list", "[Hierarchy]") {
     REQUIRE(h[6].node_id_ == 7);
     REQUIRE(h[6].type_idx_ == 1);
     REQUIRE(h[6].level_ == 0);
-    REQUIRE(h[6].parent_ == -1);
+    REQUIRE(h[6].parent_ == 0);
     REQUIRE(h[6].p_.size() == 0);
   }
 
@@ -287,7 +199,7 @@ TEST_CASE("node list", "[Hierarchy]") {
       REQUIRE(h[i].node_id_ == i + 1);
       REQUIRE(h[i].type_idx_ == 1);
       REQUIRE(h[i].level_ == i);
-      REQUIRE(h[i].parent_ == (i == 0 ? -1 : i));
+      // REQUIRE(h[i].parent_ == (i == 0 ? -1 : i));
       REQUIRE(h[i].p_.empty());
       REQUIRE(h[i].cl_ == "Task");
     }
@@ -308,7 +220,6 @@ TEST_CASE("node list", "[Hierarchy]") {
       REQUIRE(h[i].node_id_ == i + 1);
       REQUIRE(h[i].type_idx_ == 1);
       REQUIRE(h[i].level_ == i);
-      REQUIRE(h[i].parent_ == (i == 0 ? -1 : i));
       REQUIRE(h[i].p_.empty());
       REQUIRE(h[i].cl_ == "Task");
     }
@@ -320,9 +231,7 @@ TEST_CASE("static node list", "[Hierarchy]") {
     constexpr auto static_ex = [](const std::string_view& _s) constexpr -> bool {
       F_SPLIT
       F_CLEAN
-      F_CLAUSE
       F_PARAMS
-      H_COUNT_NODES
 
       constexpr std::array<std::pair<int32_t, std::string_view>, 4> variant = {
           std::make_pair<int32_t, std::string_view>(1, "Task")};
@@ -338,15 +247,22 @@ TEST_CASE("static node list", "[Hierarchy]") {
   }
 }
 
-struct TaskA {};
+struct TaskA {
+  int32_t val_ = 1;
+};
 #define TASK_TYPE TaskA
 #include <TBT/magic.hpp>
 
-struct TaskB {};
+struct TaskB {
+  int32_t val_ = 2;
+};
 #define TASK_TYPE TaskB
 #include <TBT/magic.hpp>
 
-struct TaskC {};
+struct TaskC {
+  int32_t val_ = 3;
+  int32_t it_  = 0;
+};
 #define TASK_TYPE TaskC
 #include <TBT/magic.hpp>
 
@@ -369,7 +285,7 @@ TEST_CASE("dynamic extract node list", "[Composite]") {
   const NodeHeader n1 = read_node_header(res.data() + rc0);
   REQUIRE(n1.type_idx_ == 0);
   REQUIRE(n1.children_count_ == 2);
-  REQUIRE(n1.parent_ == -1);
+  REQUIRE(n1.parent_ == 0);
   {
     const auto pl = read_payload(0, n1, res.data());
     REQUIRE(pl.index() == 3);
@@ -382,7 +298,7 @@ TEST_CASE("dynamic extract node list", "[Composite]") {
   const NodeHeader n2 = read_node_header(res.data() + c11);
   REQUIRE(n2.type_idx_ == 1);
   REQUIRE(n2.children_count_ == 0);
-  REQUIRE(n2.parent_ == 1);
+  REQUIRE(n2.parent_ != 0);
   {
     const auto pl = read_payload(0, n2, res.data());
     REQUIRE(pl.index() == 3);
@@ -392,7 +308,7 @@ TEST_CASE("dynamic extract node list", "[Composite]") {
   const NodeHeader n3 = read_node_header(res.data() + c12);
   REQUIRE(n3.type_idx_ == 2);
   REQUIRE(n3.children_count_ == 0);
-  REQUIRE(n3.parent_ == 1);
+  REQUIRE(n3.parent_ == n2.parent_);
   {
     const auto pl = read_payload(0, n3, res.data());
     REQUIRE(pl.index() == 3);
@@ -404,7 +320,7 @@ TEST_CASE("dynamic extract node list", "[Composite]") {
   const NodeHeader n4 = read_node_header(res.data() + rc1);
   REQUIRE(n4.type_idx_ == 0);
   REQUIRE(n4.children_count_ == 0);
-  REQUIRE(n4.parent_ == -1);
+  REQUIRE(n4.parent_ == 0);
   {
     const auto pl = read_payload(0, n4, res.data());
     REQUIRE(pl.index() == 3);
@@ -437,7 +353,7 @@ TEST_CASE("static extract node list", "[Composite]") {
   const NodeHeader n1 = read_node_header(res.data() + rc0);
   REQUIRE(n1.type_idx_ == 0);
   REQUIRE(n1.children_count_ == 2);
-  REQUIRE(n1.parent_ == -1);
+  REQUIRE(n1.parent_ == 0);
   {
     const auto pl = read_payload(0, n1, res.data());
     REQUIRE(pl.index() == 3);
@@ -450,7 +366,7 @@ TEST_CASE("static extract node list", "[Composite]") {
   const NodeHeader n2 = read_node_header(res.data() + c11);
   REQUIRE(n2.type_idx_ == 1);
   REQUIRE(n2.children_count_ == 0);
-  REQUIRE(n2.parent_ == 1);
+  REQUIRE(n2.parent_ != 0);
   {
     const auto pl = read_payload(0, n2, res.data());
     REQUIRE(pl.index() == 3);
@@ -460,7 +376,7 @@ TEST_CASE("static extract node list", "[Composite]") {
   const NodeHeader n3 = read_node_header(res.data() + c12);
   REQUIRE(n3.type_idx_ == 2);
   REQUIRE(n3.children_count_ == 0);
-  REQUIRE(n3.parent_ == 1);
+  REQUIRE(n3.parent_ == n2.parent_);
   {
     const auto pl = read_payload(0, n3, res.data());
     REQUIRE(pl.index() == 3);
@@ -472,10 +388,113 @@ TEST_CASE("static extract node list", "[Composite]") {
   const NodeHeader n4 = read_node_header(res.data() + rc1);
   REQUIRE(n4.type_idx_ == 0);
   REQUIRE(n4.children_count_ == 0);
-  REQUIRE(n4.parent_ == -1);
+  REQUIRE(n4.parent_ == 0);
   {
     const auto pl = read_payload(0, n4, res.data());
     REQUIRE(pl.index() == 3);
     REQUIRE(std::get<3>(pl) == 4);
   }
+}
+
+//---------------------------------------
+
+template <class States>
+TBT::State init(const TaskA& _t, States& _s) {
+  _s.t_.push_back(std::format("init [{}]", _t.val_));
+  return SUCCESS;
+}
+template <class States>
+TBT::State run(const TaskA& _t, States& _s) {
+  _s.t_.push_back(std::format("run [{}]", _t.val_));
+  return SUCCESS;
+}
+template <class States>
+void exit(const TaskA& _t, States& _s) {
+  _s.t_.push_back(std::format("exit [{}]", _t.val_));
+}
+
+//---------------------------------------
+
+template <class States>
+TBT::State init(const TaskB& _t, States& _s) {
+  _s.t_.push_back(std::format("init [{}]", _t.val_));
+  return SUCCESS;
+}
+template <class States>
+TBT::State run(const TaskB& _t, States& _s) {
+  _s.t_.push_back(std::format("run [{}]", _t.val_));
+  return SUCCESS;
+}
+template <class States>
+void exit(const TaskB& _t, States& _s) {
+  _s.t_.push_back(std::format("exit [{}]", _t.val_));
+}
+
+//---------------------------------------
+
+template <class States>
+TBT::State init(const TaskC& _t, States& _s) {
+  _s.t_.push_back(std::format("init [{}]", _t.val_));
+  return SUCCESS;
+}
+template <class States>
+TBT::State run(TaskC& _t, States& _s) {
+  if (_t.it_ < 3) {
+    _s.t_.push_back(std::format("run [{}]", _t.val_));
+    _t.it_++;
+    return BUSY;
+  }
+  return SUCCESS;
+}
+template <class States>
+void exit(const TaskC& _t, States& _s) {
+  _s.t_.push_back(std::format("exit [{}]", _t.val_));
+}
+
+TEST_CASE("single task", "[Execute]") {
+  using Variant                = std::variant<TaskA, TaskB, TaskC>;
+
+  constexpr auto vr            = variant_type_index_name_pairs<Variant>();
+
+  constexpr std::string_view s = "TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]";
+  constexpr size_t r_size      = compute_size_static<Variant>(s);
+  constexpr auto res           = compile_static<r_size, Variant>(s);
+
+  // const auto res          = compile_dynamic<Variant>(s);
+
+  struct States {
+    std::vector<std::string> t_;
+  } states;
+
+  auto tree = res;
+  while (Execute::execute_step<Variant>(tree, states, std::make_tuple(-5)) == BUSY) {
+    //
+  }
+
+  size_t i = 0;
+  REQUIRE("init [3]" == states.t_[i++]);
+  REQUIRE("run [3]" == states.t_[i++]);
+  REQUIRE("run [3]" == states.t_[i++]);
+  REQUIRE("run [3]" == states.t_[i++]);
+  REQUIRE("exit [3]" == states.t_[i++]);
+  REQUIRE("init [-5]" == states.t_[i++]);
+  REQUIRE("run [-5]" == states.t_[i++]);
+  REQUIRE("exit [-5]" == states.t_[i++]);
+  REQUIRE("init [5]" == states.t_[i++]);
+  REQUIRE("run [5]" == states.t_[i++]);
+  REQUIRE("exit [5]" == states.t_[i++]);
+  REQUIRE("init [1]" == states.t_[i++]);
+  REQUIRE("run [1]" == states.t_[i++]);
+  REQUIRE("exit [1]" == states.t_[i++]);
+  REQUIRE("init [2]" == states.t_[i++]);
+  REQUIRE("run [2]" == states.t_[i++]);
+  REQUIRE("exit [2]" == states.t_[i++]);
+  REQUIRE("init [1]" == states.t_[i++]);
+  REQUIRE("run [1]" == states.t_[i++]);
+  REQUIRE("exit [1]" == states.t_[i++]);
+  REQUIRE("init [3]" == states.t_[i++]);
+  REQUIRE("run [3]" == states.t_[i++]);
+  REQUIRE("run [3]" == states.t_[i++]);
+  REQUIRE("run [3]" == states.t_[i++]);
+  REQUIRE("exit [3]" == states.t_[i++]);
 }

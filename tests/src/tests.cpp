@@ -526,7 +526,5 @@ TEST_CASE("prepare", "[Execute]") {
   const auto prep2 = COMPILE_AND_PREPARE("TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]", states, -5);
 
   const auto [promise, tree_ptr] =
-      COMPILE_AND_QUEUE("TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]", states, -5);
-
-  while (true) { EXECUTE_QUEUE(states) }
+      COMPILE_AND_QUEUE("TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]", states, FULL_1, -5);
 }

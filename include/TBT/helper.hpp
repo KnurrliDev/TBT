@@ -4,19 +4,45 @@
 
 namespace TBT {
 
-  using TaskQueue = std::forward_list<std::pair<std::function<TBT::State()>, std::promise<TBT::State>>>;
+  enum ExecutionMode { STEPWISE_1, STEPWISE_INF, FULL_1, FULL_INF };
 
-#define EXECUTE_QUEUE(state_provider)               \
-  if (!states.tasks_queue_.empty()) {               \
-    auto prev = states.tasks_queue_.before_begin(); \
-    auto curr = states.tasks_queue_.begin();        \
-    while (curr != states.tasks_queue_.end()) {     \
-      auto& [next, prm] = *curr;                    \
-      TBT::State r      = TBT::State::SUCCESS;      \
-      while ((r = next()) != TBT::BUSY) {}          \
-      prm.set_value(r);                             \
-      curr = states.tasks_queue_.erase_after(prev); \
-    }                                               \
+  using TaskQueue = std::forward_list<std::tuple<ExecutionMode, std::function<TBT::State()>, std::promise<TBT::State>>>;
+
+#define EXECUTE_QUEUE(state_provider)                         \
+  if (!states.tasks_queue_.empty()) {                         \
+    auto prev = states.tasks_queue_.before_begin();           \
+    auto curr = states.tasks_queue_.begin();                  \
+    while (true) {                                            \
+      if (!states.tasks_queue_.empty()) {                     \
+        auto prev = states.tasks_queue_.before_begin();       \
+        auto curr = states.tasks_queue_.begin();              \
+        while (curr != states.tasks_queue_.end()) {           \
+          auto& [mode, next, prm] = *curr;                    \
+                                                              \
+          switch (mode) {                                     \
+            case STEPWISE_1: {                                \
+              TBT::State r = next();                          \
+              if (r != TBT::BUSY) {                           \
+                prm.set_value(r);                             \
+                curr = states.tasks_queue_.erase_after(prev); \
+              }                                               \
+            }                                                 \
+            case STEPWISE_INF: {                              \
+              next();                                         \
+            }                                                 \
+            case FULL_1: {                                    \
+              TBT::State r = TBT::State::SUCCESS;             \
+              while ((r = next()) != TBT::BUSY) {}            \
+              prm.set_value(r);                               \
+              curr = states.tasks_queue_.erase_after(prev);   \
+            }                                                 \
+            case FULL_INF: {                                  \
+              while ((next()) != TBT::BUSY) {}                \
+            }                                                 \
+          }                                                   \
+        }                                                     \
+      }                                                       \
+    }                                                         \
   }
 
 #define COMPILE_AND_PREPARE(tree, states, ...)                                      \
@@ -30,108 +56,18 @@ namespace TBT {
     return Execute::prepare<Variant>(compile_dynamic<Variant>(_tree), _states, std::forward<Ts>(_ts)...);
   }  // d_compile_and_prepare
 
-#define COMPILE_AND_QUEUE(tree, states, ...)                                                        \
-  [&]() -> auto {                                                                                   \
-    std::promise<TBT::State> prm;                                                                   \
-    std::future<TBT::State> out = prm.get_future();                                                 \
-    const auto ct               = COMPILE_AND_PREPARE(tree, states, __VA_ARGS__);                   \
-    auto& ref                   = states.tasks_queue_.emplace_front(std::move(ct), std::move(prm)); \
-    return std::make_pair(std::move(out), std::ref(ref));                                           \
+#define COMPILE_AND_QUEUE(tree, states, mode, ...)                                                        \
+  [&]() -> auto {                                                                                         \
+    std::promise<TBT::State> prm;                                                                         \
+    std::future<TBT::State> out = prm.get_future();                                                       \
+    const auto ct               = COMPILE_AND_PREPARE(tree, states, __VA_ARGS__);                         \
+    auto& ref                   = states.tasks_queue_.emplace_front(mode, std::move(ct), std::move(prm)); \
+    return std::make_pair(std::move(out), std::ref(ref));                                                 \
   }();
 
-  // void exe() {
-  //   for (auto it = proxy.tasks_.tasks_.begin(); it != proxy.tasks_.tasks_.end();) {
-  //     auto& [state, next, prm] = *it;
-
-  //     if (state == 0) {
-  //       TBT::State r = TBT::State::SUCCESS;
-  //       while ((r = next()) != TBT::BUSY) {}
-  //       prm.set_value(r);
-  //       it = proxy.tasks_.tasks_.erase(it);
-  //     } else {
-  //       bool finished = false;
-  //       for (int32_t i = 0; i < state; ++i) {
-  //         const TBT::State r = next();
-  //         if (r != TBT::BUSY) {
-  //           prm.set_value(r);
-  //           finished = true;
-  //           break;
-  //         }
-  //       }
-  //       if (finished) {
-  //         it = proxy.tasks_.tasks_.erase(it);
-  //         continue;
-  //       };
-  //     }
-  //     ++it;
-  //   }
-  // }
-
-  // template <class TaskTypes>
-  // [[nodiscard]] std::string compile_tree(RenderProxy<TaskTypes>& _proxy, const std::string& _tree) {
-  //   static const tsl::robin_map<std::string, int16_t> types = TBT::create_mapping<TaskTypes>();
-  //   const std::shared_ptr<TBT::Detail::Node> root           = TBT::build(_tree, types);
-  //   return TBT::compile(root);
-  // }  // compile_tree
-
-  // template <class TaskTypes, class... Ts>
-  // std::function<TBT::State()> prepare_tree(RenderProxy<TaskTypes>& _proxy, std::string _tree, Ts&&... ts) {
-  //   return TBT::prepare<TaskTypes>(std::move(_tree), _proxy, std::forward<Ts>(ts)...);
-  // }  // prepare_tree
-
-  // // state: 0 - runs until done, >0 state steps/ iteration
-  // template <class TaskTypes>
-  // std::future<TBT::State> queue_tree(RenderProxy<TaskTypes>& _proxy, std::function<TBT::State()> _tree,
-  //                                    const int32_t _state) {
-  //   std::promise<TBT::State> prm;
-  //   std::future<TBT::State> out = prm.get_future();
-  //   _proxy.tasks_.cache_.emplace(_state, std::move(_tree), std::move(prm));
-  //   return out;
-  // }  // queue_tree
-
-  // template <class TaskTypes, class... Ts>
-  // std::future<TBT::State> queue_tree(RenderProxy<TaskTypes>& _proxy, const std::string& _tree, const int32_t _state,
-  //                                    Ts&&... ts) {
-  //   auto t = prepare_tree(_proxy, compile_tree(_proxy, _tree), std::forward<Ts>(ts)...);
-  //   return queue_tree(_proxy, std::move(t), _state);
-  // }  // run_tree_from_cache
-
-  // template <class TaskTypes, class... Ts>
-  // TBT::State run_tree(RenderProxy<TaskTypes>& _proxy, const std::string& _tree, Ts&&... ts) {
-  //   auto t         = prepare_tree(_proxy, compile_tree(_proxy, _tree), std::forward<Ts>(ts)...);
-  //   TBT::State res = TBT::State::SUCCESS;
-  //   while ((res = t()) == TBT::BUSY) {}
-  //   return res;
-  // }  // run_tree_from_cache
-
-  //------------------------------------------------------
-
-  // template <class TaskTypes>
-  // void compile_and_cache_tree(RenderProxy<TaskTypes>& _proxy, const std::string& _id, const std::string& _tree) {
-  //   _proxy.tasks_.tree_cache_[_id] = compile_tree(_proxy, _tree);
-  // }  // compile_and_cache_tree
-
-  // template <class TaskTypes, class... Ts>
-  // std::function<TBT::State()> prepare_from_cache(RenderProxy<TaskTypes>& _proxy, const std::string& _id, Ts&&... ts)
-  // {
-  //   return prepare_tree(_proxy, _proxy.tasks_.tree_cache_.at(_id), std::forward<Ts>(ts)...);
-  // }  // prepare_from_cache
-
-  // // state: 0 - runs until done, >0 state steps/ iteration
-  // template <class TaskTypes, class... Ts>
-  // std::future<TBT::State> queue_tree_from_cache(RenderProxy<TaskTypes>& _proxy, const std::string& _id,
-  //                                               const int32_t _state, Ts&&... ts) {
-  //   assert(_proxy.tasks_.tree_cache_.contains(_id));
-  //   return queue_tree(_proxy, prepare_from_cache(_proxy, _id, std::forward<Ts>(ts)...), _state);
-  // }  // queue_tree_from_cache
-
-  // template <class TaskTypes, class... Ts>
-  // TBT::State run_tree_from_cache(RenderProxy<TaskTypes>& _proxy, const std::string& _id, Ts&&... ts) {
-  //   assert(_proxy.tasks_.tree_cache_.contains(_id));
-  //   auto t         = prepare_from_cache(_proxy, _id, std::forward<Ts>(ts)...);
-  //   TBT::State res = TBT::State::SUCCESS;
-  //   while ((res = t()) == TBT::BUSY) {}
-  //   return res;
-  // }  // run_tree_from_cache
+#define COMPILE_AND_QUEUE_STEPWISE_1(tree, states, ...) COMPILE_AND_QUEUE(tree, states, STEPWISE_1, __VA_ARGS__)
+#define COMPILE_AND_QUEUE_STEPWISE_INF(tree, states, ...) COMPILE_AND_QUEUE(tree, states, STEPWISE_INF, __VA_ARGS__)
+#define COMPILE_AND_QUEUE_FULL_1(tree, states, ...) COMPILE_AND_QUEUE(tree, states, FULL_1, __VA_ARGS__)
+#define COMPILE_AND_QUEUE_FULL_INF(tree, states, ...) COMPILE_AND_QUEUE(tree, states, FULL_INF, __VA_ARGS__)
 
 }  // namespace TBT

@@ -150,176 +150,168 @@ namespace TBT::Compiler {
 
     std::unreachable();
   }  // read_payload
-  // clang-format off
-#define F_SPLIT                                                           \
-const auto split = [](const std::string_view& _s, const char _delim) ->   \
-  std::vector<std::string_view> {                                         \
-  std::vector<std::string_view> result;                                   \
-  size_t start = 0;                                                       \
-  size_t end   = _s.find(_delim);                                         \
-                                                                          \
-  while (end != std::string::npos && end < _s.size()) {                   \
-    if (start == end)                                                     \
-      result.emplace_back();                                              \
-    else                                                                  \
-      result.push_back({&_s[start], end - start});                        \
-    start = end + 1;                                                      \
-    end   = _s.find(_delim, start);                                       \
-  }                                                                       \
-                                                                          \
-  if (start == _s.size())                                                 \
-    result.emplace_back();                                                \
-  else                                                                    \
-    result.push_back({&_s[start], _s.size()  - start});                   \
-  return result;                                                          \
-};
 
-#define F_CLEAN                                                           \
-const auto clean = [](std::string _in) -> std::string {                   \
-    size_t j = 0;                                                         \
-    for (size_t i = 0; i < _in.size(); ++i) {                             \
-      switch (_in[i]) {                                                   \
-        case 0x20: /* space ' ' */                                        \
-        case 0x0c: /* form feed '\f' */                                   \
-        case 0x0a: /* line feed '\n' */                                   \
-        case 0x0d: /* carriage return '\r' */                             \
-        case 0x09: /* horizontal tab '\t' */                              \
-        case 0x0b: /* vertical tab '\v' */                                \
-          continue;                                                       \
-        default:                                                          \
-          _in[j++] = _in[i];                                              \
-      }                                                                   \
-    }                                                                     \
-    _in.resize(j);                                                        \
-    return _in;                                                           \
+#define F_SPLIT                                                                                           \
+  const auto split = [](const std::string_view& _s, const char _delim) -> std::vector<std::string_view> { \
+    std::vector<std::string_view> result;                                                                 \
+    size_t start = 0;                                                                                     \
+    size_t end   = _s.find(_delim);                                                                       \
+                                                                                                          \
+    while (end != std::string::npos && end < _s.size()) {                                                 \
+      if (start == end)                                                                                   \
+        result.emplace_back();                                                                            \
+      else                                                                                                \
+        result.push_back({&_s[start], end - start});                                                      \
+      start = end + 1;                                                                                    \
+      end   = _s.find(_delim, start);                                                                     \
+    }                                                                                                     \
+                                                                                                          \
+    if (start == _s.size())                                                                               \
+      result.emplace_back();                                                                              \
+    else                                                                                                  \
+      result.push_back({&_s[start], _s.size() - start});                                                  \
+    return result;                                                                                        \
   };
 
-  #define F_PARAMS                                                        \
-   const auto extract_params = [&](const std::string_view& _s)            \
-    -> std::vector<Parameter> {                                           \
-    std::vector<Parameter> out;                                           \
-                                                                          \
-    const auto parts = split(_s, ',');                                    \
-                                                                          \
-    for (const auto& r : parts) {                                         \
-      if (r.empty()) continue;                                            \
-                                                                          \
-      if (r[0] == '$') {                                                  \
-        const std::optional<uint32_t> val =                               \
-          stn::StrToUInt32(std::string_view(&r[1], r.size() - 1));        \
-        if (val) { out.push_back(val.value()); }                          \
-        continue;                                                         \
-      } else if (r == "true") {                                           \
-        out.push_back(true);                                              \
-        continue;                                                         \
-      } else if (r == "false") {                                          \
-        out.push_back(false);                                             \
-        continue;                                                         \
-      }                                                                   \
-      if (r.contains('.') || r.contains('f')) {                           \
-        const std::optional<float> val = stn::StrToFloat(r);              \
-        if (val) { out.push_back(val.value()); }                          \
-      } else {                                                            \
-        const std::optional<int32_t> val = stn::StrToInt32(r);            \
-        if (val) { out.push_back(val.value()); }                          \
-      }                                                                   \
-    }                                                                     \
-    return out;                                                           \
+#define F_CLEAN                                           \
+  const auto clean = [](std::string _in) -> std::string { \
+    size_t j = 0;                                         \
+    for (size_t i = 0; i < _in.size(); ++i) {             \
+      switch (_in[i]) {                                   \
+        case 0x20: /* space ' ' */                        \
+        case 0x0c: /* form feed '\f' */                   \
+        case 0x0a: /* line feed '\n' */                   \
+        case 0x0d: /* carriage return '\r' */             \
+        case 0x09: /* horizontal tab '\t' */              \
+        case 0x0b: /* vertical tab '\v' */                \
+          continue;                                       \
+        default:                                          \
+          _in[j++] = _in[i];                              \
+      }                                                   \
+    }                                                     \
+    _in.resize(j);                                        \
+    return _in;                                           \
   };
 
-  #define H_EXTRACT                                                                   \
-  const auto h_extract  = [&](std::string_view s)                                     \
-    -> std::expected<std::vector<Node>, std::string_view> {                           \
-    std::vector<Node> nodes;                                                          \
-    /* {level, parent_id} */                                                          \
-    std::vector<std::pair<int32_t, int32_t>> stack = {{0, 0}};                        \
-    int32_t next_id                                = 1;                               \
-    size_t i                                       = 0;                               \
-                                                                                      \
-    const auto parse_node_name = [&]()                                                \
-      -> std::expected<std::string_view, std::string_view> {                          \
-      size_t start = i;                                                               \
-      while (i < s.size()) {                                                          \
-        char c = s[i];                                                                \
-        if (c == '(' || c == '[' || c == ']' || c == ',') break;                      \
-        ++i;                                                                          \
-      }                                                                               \
-      if (i == start) return std::unexpected("empty node name");                      \
-      return s.substr(start, i - start);                                              \
-    };                                                                                \
-                                                                                      \
-    const auto parse_params = [&]() -> std::vector<Parameter> {                       \
-      if (i >= s.size() || s[i] != '(') return {};                                    \
-      ++i;  /* skip '(' */                                                            \
-      int depth    = 1;                                                               \
-      size_t start = i;                                                               \
-      while (i < s.size() && depth > 0) {                                             \
-        if (s[i] == '(')                                                              \
-          ++depth;                                                                    \
-        else if (s[i] == ')')                                                         \
-          --depth;                                                                    \
-        ++i;                                                                          \
-      }                                                                               \
-      return extract_params(s.substr(start, i - start - 1));                          \
-    };                                                                                \
-                                                                                      \
-    const auto get_idx_for_type = [&](const std::string_view& _ss)                    \
-      -> std::optional<size_t> {                                                      \
-      const auto t = _ss.substr(0, _ss.find_first_of('('));                           \
-      for (size_t i = 0; i < variant.size(); ++i)                                     \
-        if (variant[i].second == t) return variant[i].first;                          \
-      return std::nullopt;                                                            \
-    };                                                                                \
-                                                                                      \
-    while (i < s.size()) {                                                            \
-                                                                                      \
-      /* Parse node name */                                                           \
-      auto name_res = parse_node_name();                                              \
-      if (!name_res) return std::unexpected(name_res.error());                        \
-      std::string_view name = name_res.value();                                       \
-                                                                                      \
-      Node n;                                                                         \
-      n.cl_      = name;                                                              \
-      n.node_id_ = next_id++;                                                         \
-      n.level_   = stack.back().first;                                                \
-      n.parent_  = stack.back().second;                                               \
-                                                                                      \
-      auto idx   = get_idx_for_type(name);                                            \
-      if (!idx) return std::unexpected(name);                                         \
-      n.type_idx_ = idx.value();                                                      \
-                                                                                      \
-      /* Parse optional parameters */                                                 \
-      if (i < s.size() && s[i] == '(') { n.p_ = parse_params(); }                     \
-                                                                                      \
-      nodes.push_back(std::move(n));                                                  \
-                                                                                      \
-      if (i >= s.size()) break;                                                       \
-                                                                                      \
-      char c = s[i];                                                                  \
-                                                                                      \
-      if (c == '[') {                                                                 \
-        stack.push_back({stack.back().first + 1, n.node_id_});                        \
-        ++i;                                                                          \
-      } else if (c == ']') {                                                          \
-        stack.pop_back();                                                             \
-        ++i;                                                                          \
-        /* Handle possible consecutive ]]... by continuing */                         \
-        while (i < s.size() && s[i] == ']') {                                         \
-          stack.pop_back();                                                           \
-          ++i;                                                                        \
-        }                                                                             \
-        /* After closing brackets, expect either ',' or end or another node */        \
-        if (i < s.size() && s[i] == ',') ++i;                                         \
-      } else if (c == ',') {                                                          \
-        ++i;                                                                          \
-      } else {                                                                        \
-        return std::unexpected(s.substr(i, 10));  /* invalid char */                  \
-      }                                                                               \
-    }                                                                                 \
-                                                                                      \
-    return nodes;                                                                     \
+#define F_PARAMS                                                                                     \
+  const auto extract_params = [&](const std::string_view& _s) -> std::vector<Parameter> {            \
+    std::vector<Parameter> out;                                                                      \
+                                                                                                     \
+    const auto parts = split(_s, ',');                                                               \
+                                                                                                     \
+    for (const auto& r : parts) {                                                                    \
+      if (r.empty()) continue;                                                                       \
+                                                                                                     \
+      if (r[0] == '$') {                                                                             \
+        const std::optional<uint32_t> val = stn::StrToUInt32(std::string_view(&r[1], r.size() - 1)); \
+        if (val) { out.push_back(val.value()); }                                                     \
+        continue;                                                                                    \
+      } else if (r == "true") {                                                                      \
+        out.push_back(true);                                                                         \
+        continue;                                                                                    \
+      } else if (r == "false") {                                                                     \
+        out.push_back(false);                                                                        \
+        continue;                                                                                    \
+      }                                                                                              \
+      if (r.contains('.') || r.contains('f')) {                                                      \
+        const std::optional<float> val = stn::StrToFloat(r);                                         \
+        if (val) { out.push_back(val.value()); }                                                     \
+      } else {                                                                                       \
+        const std::optional<int32_t> val = stn::StrToInt32(r);                                       \
+        if (val) { out.push_back(val.value()); }                                                     \
+      }                                                                                              \
+    }                                                                                                \
+    return out;                                                                                      \
   };
-  // clang-format on
+
+#define H_EXTRACT                                                                                                 \
+  const auto h_extract = [&](std::string_view s) -> std::expected<std::vector<Node>, std::string_view> {          \
+    std::vector<Node> nodes;                                                                                      \
+    /* {level, parent_id} */                                                                                      \
+    std::vector<std::pair<int32_t, int32_t>> stack = {{0, 0}};                                                    \
+    int32_t next_id                                = 1;                                                           \
+    size_t i                                       = 0;                                                           \
+                                                                                                                  \
+    const auto parse_node_name                     = [&]() -> std::expected<std::string_view, std::string_view> { \
+      size_t start = i;                                                                       \
+      while (i < s.size()) {                                                                  \
+        char c = s[i];                                                                        \
+        if (c == '(' || c == '[' || c == ']' || c == ',') break;                              \
+        ++i;                                                                                  \
+      }                                                                                       \
+      if (i == start) return std::unexpected("empty node name");                              \
+      return s.substr(start, i - start);                                                      \
+    };                                                                                                            \
+                                                                                                                  \
+    const auto parse_params = [&]() -> std::vector<Parameter> {                                                   \
+      if (i >= s.size() || s[i] != '(') return {};                                                                \
+      ++i; /* skip '(' */                                                                                         \
+      int depth    = 1;                                                                                           \
+      size_t start = i;                                                                                           \
+      while (i < s.size() && depth > 0) {                                                                         \
+        if (s[i] == '(')                                                                                          \
+          ++depth;                                                                                                \
+        else if (s[i] == ')')                                                                                     \
+          --depth;                                                                                                \
+        ++i;                                                                                                      \
+      }                                                                                                           \
+      return extract_params(s.substr(start, i - start - 1));                                                      \
+    };                                                                                                            \
+                                                                                                                  \
+    const auto get_idx_for_type = [&](const std::string_view& _ss) -> std::optional<size_t> {                     \
+      const auto t = _ss.substr(0, _ss.find_first_of('('));                                                       \
+      for (size_t i = 0; i < variant.size(); ++i)                                                                 \
+        if (variant[i].second == t) return variant[i].first;                                                      \
+      return std::nullopt;                                                                                        \
+    };                                                                                                            \
+                                                                                                                  \
+    while (i < s.size()) {                                                                                        \
+      /* Parse node name */                                                                                       \
+      auto name_res = parse_node_name();                                                                          \
+      if (!name_res) return std::unexpected(name_res.error());                                                    \
+      std::string_view name = name_res.value();                                                                   \
+                                                                                                                  \
+      Node n;                                                                                                     \
+      n.cl_      = name;                                                                                          \
+      n.node_id_ = next_id++;                                                                                     \
+      n.level_   = stack.back().first;                                                                            \
+      n.parent_  = stack.back().second;                                                                           \
+                                                                                                                  \
+      auto idx   = get_idx_for_type(name);                                                                        \
+      if (!idx) return std::unexpected(name);                                                                     \
+      n.type_idx_ = idx.value();                                                                                  \
+                                                                                                                  \
+      /* Parse optional parameters */                                                                             \
+      if (i < s.size() && s[i] == '(') { n.p_ = parse_params(); }                                                 \
+                                                                                                                  \
+      nodes.push_back(std::move(n));                                                                              \
+                                                                                                                  \
+      if (i >= s.size()) break;                                                                                   \
+                                                                                                                  \
+      char c = s[i];                                                                                              \
+                                                                                                                  \
+      if (c == '[') {                                                                                             \
+        stack.push_back({stack.back().first + 1, n.node_id_});                                                    \
+        ++i;                                                                                                      \
+      } else if (c == ']') {                                                                                      \
+        stack.pop_back();                                                                                         \
+        ++i;                                                                                                      \
+        /* Handle possible consecutive ]]... by continuing */                                                     \
+        while (i < s.size() && s[i] == ']') {                                                                     \
+          stack.pop_back();                                                                                       \
+          ++i;                                                                                                    \
+        }                                                                                                         \
+        /* After closing brackets, expect either ',' or end or another node */                                    \
+        if (i < s.size() && s[i] == ',') ++i;                                                                     \
+      } else if (c == ',') {                                                                                      \
+        ++i;                                                                                                      \
+      } else {                                                                                                    \
+        return std::unexpected(s.substr(i, 10)); /* invalid char */                                               \
+      }                                                                                                           \
+    }                                                                                                             \
+                                                                                                                  \
+    return nodes;                                                                                                 \
+  };
 
   struct Node {
     int32_t node_id_  = 0;

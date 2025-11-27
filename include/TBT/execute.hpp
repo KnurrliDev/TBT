@@ -362,7 +362,7 @@ namespace TBT::Execute {
     // read header of current node
     const NodeHeader cur_node_header = read_node_header(_tree.data() + global_header.ptr_);
 
-    assert(cur_node_header.type_idx_ >= 0 || cur_node_header.type_idx_ < std::variant_size_v<Variant>);
+    assert(cur_node_header.type_idx_ >= 0 || cur_node_header.type_idx_ < (int16_t)std::variant_size_v<Variant>);
     execute_task<Variant>(_tree.data(), global_header, cur_node_header, _states, _params);
 
     // check if returned to root

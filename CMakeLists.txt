@@ -68,6 +68,7 @@ function(tbt_target_compile_options target visibility)
         # --- GCC / Clang common flags ---
         set(common_flags
             -Wall -Wextra -Wpedantic
+#            -Wunused-but-set-variable
 #            -Wshadow
 #            -Wnon-virtual-dtor
 #            -Wold-style-cast

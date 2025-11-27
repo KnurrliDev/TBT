@@ -440,22 +440,22 @@ namespace TBT::Compiler {
                          const auto pa     = std::bit_cast<std::array<uint8_t, sizeof(int32_t)>>((int32_t)_p);
                          _vals[offset]     = pt_bool;
                          _vals[offset + 1] = pa[0];
-                         for (int32_t i = 1; i < sizeof(int32_t); ++i) _vals[offset + 1 + i] = 0x0;
+                         for (int32_t i = 1; i < (int32_t)sizeof(int32_t); ++i) _vals[offset + 1 + i] = 0x0;
                        },
                        [&](const int32_t _p) {
                          const auto pa = std::bit_cast<std::array<uint8_t, sizeof(int32_t)>>(_p);
                          _vals[offset] = pt_int;
-                         for (int32_t i = 0; i < sizeof(int32_t); ++i) _vals[offset + 1 + i] = pa[i];
+                         for (int32_t i = 0; i < (int32_t)sizeof(int32_t); ++i) _vals[offset + 1 + i] = pa[i];
                        },
                        [&](const float _p) {
                          const auto pa = std::bit_cast<std::array<uint8_t, sizeof(float)>>(_p);
                          _vals[offset] = pt_float;
-                         for (int32_t i = 0; i < sizeof(float); ++i) _vals[offset + 1 + i] = pa[i];
+                         for (int32_t i = 0; i < (int32_t)sizeof(float); ++i) _vals[offset + 1 + i] = pa[i];
                        },
                        [&](const uint32_t _p) {
                          const auto pa = std::bit_cast<std::array<uint8_t, sizeof(uint32_t)>>(_p);
                          _vals[offset] = pt_dyn;
-                         for (int32_t i = 0; i < sizeof(uint32_t); ++i) _vals[offset + 1 + i] = pa[i];
+                         for (int32_t i = 0; i < (int32_t)sizeof(uint32_t); ++i) _vals[offset + 1 + i] = pa[i];
                        }),
                    p);
       }
@@ -491,7 +491,7 @@ namespace TBT::Compiler {
       // parent
       if (n.parent_ != 0) {
         std::array<uint8_t, sizeof(NodeHeader)> tmp;
-        for (int32_t j = 0; j < sizeof(NodeHeader); ++j) tmp[j] = _vals[n.offset_ + j];
+        for (int32_t j = 0; j < (int32_t)sizeof(NodeHeader); ++j) tmp[j] = _vals[n.offset_ + j];
         NodeHeader tar = std::bit_cast<NodeHeader>(tmp);
 
         for (const auto& nc : nodes) {
@@ -499,7 +499,7 @@ namespace TBT::Compiler {
             tar.parent_   = nc.offset_;
 
             const auto ca = std::bit_cast<std::array<uint8_t, sizeof(NodeHeader)>>(tar);
-            for (int32_t j = 0; j < sizeof(NodeHeader); ++j) _vals[n.offset_ + j] = ca[j];
+            for (int32_t j = 0; j < (int32_t)sizeof(NodeHeader); ++j) _vals[n.offset_ + j] = ca[j];
             break;
           }
         }
@@ -518,7 +518,8 @@ namespace TBT::Compiler {
           if (nc.node_id_ == children[i]) {
             // write children (4 bytes per child)
             const auto ca = std::bit_cast<std::array<char, sizeof(int32_t)>>(nc.offset_);
-            for (int32_t j = 0; j < sizeof(int32_t); ++j) _vals[c_ptr + i * sizeof(int32_t) + j] = ca[j];
+            for (int32_t j = 0; j < (int32_t)sizeof(int32_t); ++j)
+              _vals[c_ptr + i * (int32_t)sizeof(int32_t) + j] = ca[j];
             break;
           }
         }

@@ -9,6 +9,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <string_view>
 #include <type_traits>
 
@@ -21,6 +22,34 @@
 #define STN_RETURN_TYPE(NumT, CharT) std::optional<NumT>
 #define STN_RETURN_NULL(x) std::nullopt
 #endif
+
+// Returns 1 if a bit was found, 0 otherwise
+// Sets *pIndex to the position of the highest set bit (MSB)
+// Works for 32-bit values
+inline constexpr int portable_bit_scan_reverse(unsigned long* pIndex, unsigned long ulMask) {
+  if (ulMask == 0) { return 0; }
+
+#if defined(_MSC_VER)
+  // MSVC: use intrinsic
+  unsigned long index;
+  unsigned char ret = _BitScanReverse(&index, ulMask);
+  *pIndex           = index;
+  return ret;
+
+#elif defined(__GNUC__) || defined(__clang__)
+  // GCC/Clang: use builtin
+  if (ulMask == 0) return 0;
+  *pIndex = 31 - __builtin_clz(ulMask);  // clz = count leading zeros
+  return 1;
+
+#else
+  // Fallback: manual loop (slower but works everywhere)
+  unsigned long index = 0;
+  while (ulMask >>= 1) { ++index; }
+  *pIndex = index;
+  return 1;
+#endif
+}
 
 namespace stn {
   enum class errc {            // names for generic error codes
@@ -90,7 +119,7 @@ namespace stn {
         return 1;
       }
 
-      return _BitScanReverse(pIndex, ulMask);  // assumes Xval.Mydata[Bx] != 0
+      return portable_bit_scan_reverse(pIndex, ulMask);  // assumes Xval.Mydata[Bx] != 0
     }
 
     template <class CharT>

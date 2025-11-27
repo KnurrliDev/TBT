@@ -340,7 +340,6 @@ namespace TBT::Execute {
       _global_header.last_result_.state_ = res;
       return BUSY;
     }
-    return BUSY;
   }  // execute_task
 
   template <class Variant, class Tree, class StateProvider, class... Ts>
@@ -396,7 +395,7 @@ namespace TBT::Execute {
 
   // prepares for the execution of a tree
   template <class Variant, class Tree, class StateProvider, class... Ts>
-  [[noidscard]] std::function<State()> prepare(Tree _tree, StateProvider& _states, Ts... _ts) {
+  [[nodiscard]] std::function<State()> prepare(Tree _tree, StateProvider& _states, Ts... _ts) {
     return
         [tree = std::move(_tree), states = std::ref(_states), params = std::make_tuple(std::move(_ts)...)]() -> State {
           return execute_step<Variant>(*const_cast<Tree*>(&tree), states.get(), params);

@@ -246,8 +246,8 @@ namespace TBT::Compiler {
     const auto parse_params = [&]() -> std::vector<Parameter> {                                                   \
       if (i >= s.size() || s[i] != '(') return {};                                                                \
       ++i; /* skip '(' */                                                                                         \
-      int depth    = 1;                                                                                           \
-      size_t start = i;                                                                                           \
+      int32_t depth = 1;                                                                                          \
+      size_t start  = i;                                                                                          \
       while (i < s.size() && depth > 0) {                                                                         \
         if (s[i] == '(')                                                                                          \
           ++depth;                                                                                                \
@@ -279,7 +279,7 @@ namespace TBT::Compiler {
                                                                                                                   \
       auto idx   = get_idx_for_type(name);                                                                        \
       if (!idx) return std::unexpected(name);                                                                     \
-      n.type_idx_ = idx.value();                                                                                  \
+      n.type_idx_ = (int32_t)idx.value();                                                                         \
                                                                                                                   \
       /* Parse optional parameters */                                                                             \
       if (i < s.size() && s[i] == '(') { n.p_ = parse_params(); }                                                 \
@@ -397,7 +397,7 @@ namespace TBT::Compiler {
     const auto root_children = gather_children(0, nodes);
 
     Header header;
-    header.node_count_        = nodes.size();
+    header.node_count_        = (int32_t)nodes.size();
     header.ptr_               = 0;
     header.node_count_        = (uint16_t)nodes.size();
     header.children_count_    = (uint16_t)root_children.size();
@@ -409,32 +409,32 @@ namespace TBT::Compiler {
 
     uint32_t ptr = header.first_node_offset_;
     for (Node& n : nodes) {
-      NodeHeader header;
-      header.type_idx_        = n.type_idx_;
-      header.parent_          = n.parent_;
+      NodeHeader nheader;
+      nheader.type_idx_        = (int16_t)n.type_idx_;
+      nheader.parent_          = n.parent_;
 
-      const auto children     = gather_children(n.node_id_, nodes);
-      header.children_count_  = (uint16_t)children.size();
-      header.children_offset_ = ptr + (uint32_t)sizeof(NodeHeader);
+      const auto children      = gather_children(n.node_id_, nodes);
+      nheader.children_count_  = (uint16_t)children.size();
+      nheader.children_offset_ = ptr + (uint32_t)sizeof(NodeHeader);
 
-      header.params_count_    = (uint16_t)n.p_.size();
-      header.params_offset_   = header.children_offset_ + header.children_count_ * sizeof(int32_t);
+      nheader.params_count_    = (uint16_t)n.p_.size();
+      nheader.params_offset_   = nheader.children_offset_ + nheader.children_count_ * sizeof(int32_t);
 
-      header.comp_offset_     = header.params_offset_ + header.params_count_ * (1 + sizeof(int32_t));
+      nheader.comp_offset_     = nheader.params_offset_ + nheader.params_count_ * (1 + sizeof(int32_t));
 
-      header.node_size_       = header.comp_offset_ + sizeof(Composite) - ptr;
+      nheader.node_size_       = nheader.comp_offset_ + sizeof(Composite) - ptr;
 
-      n.offset_               = ptr;
-      n.size_                 = header.node_size_;
+      n.offset_                = ptr;
+      n.size_                  = nheader.node_size_;
 
       // write header
-      const auto nha          = std::bit_cast<std::array<uint8_t, sizeof(NodeHeader)>>(header);
+      const auto nha           = std::bit_cast<std::array<uint8_t, sizeof(NodeHeader)>>(nheader);
       for (size_t i = 0; i < sizeof(NodeHeader); ++i) _vals[ptr + i] = nha[i];
 
       // write params (5 bytes per param)
       for (size_t i = 0; i < n.p_.size(); ++i) {
         const auto& p       = n.p_[i];
-        const size_t offset = header.params_offset_ + i * (1 + sizeof(int32_t));
+        const size_t offset = nheader.params_offset_ + i * (1 + sizeof(int32_t));
         std::visit(overloaded(
                        [&](const bool _p) {
                          const auto pa     = std::bit_cast<std::array<uint8_t, sizeof(int32_t)>>((int32_t)_p);
@@ -465,9 +465,9 @@ namespace TBT::Compiler {
       cmp.ptr_     = 0;
 
       auto cmpa    = std::bit_cast<std::array<uint8_t, sizeof(Composite)>>(cmp);
-      for (size_t i = 0; i < sizeof(Composite); ++i) _vals[header.comp_offset_ + i] = cmpa[i];
+      for (size_t i = 0; i < sizeof(Composite); ++i) _vals[nheader.comp_offset_ + i] = cmpa[i];
 
-      ptr += header.node_size_;
+      ptr += nheader.node_size_;
     }
 
     // link root children

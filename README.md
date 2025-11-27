@@ -1,14 +1,21 @@
 # TBT — Functional Task-Based Trees
 
-**TBT** is a **header-only**, **purely functional**, **compile-time parsed** behavior tree / hierarchical task framework for modern C++.
+**TBT** is a **header-only**, **purely functional**, **compile-time parsed** hierarchical task framework for modern C++.
 
 No inheritance. No virtual calls.  
 Just clean, declarative, human-readable tree definitions — fully resolved and validated at **compile time**.
 
 Perfect for games, robotics, animation systems, tools, or any domain that benefits from composable, data-oriented logic.
 
-## Requirements
-C++23, glaze for compile time reflection and a working preprocessor for the macro.
+## Features
+- Fully static & functional task composition
+- Compile-time tree validation and construction
+- Human-readable tree definition syntax
+- No inheritance, no pointers, no oop
+- Easy integration into existing codebases
+- Supports nested trees, parameters, and subtrees
+- Excells at async task dispatches.
+- Designed for games, robotics, AI, or any hierarchical task system
 
 ## Why TBT is Different
 
@@ -22,15 +29,47 @@ C++23, glaze for compile time reflection and a working preprocessor for the macr
 | Parameterized subtrees        | Yes (via `$0`, `$1`, ...)    | Manual / limited               | Manual               |
 | Nested tree spawning          | Yes (from inside tasks)      | Yes                            | Yes                  |
 
-## Features
+## Terminology
 
-- Fully static & functional task composition
-- Compile-time tree validation and construction
-- Human-readable tree definition syntax
-- No inheritance, no pointers, no runtime type erasure (except one `std::variant`)
-- Easy integration into existing codebases
-- Supports nested trees, parameters, and subtrees
-- Designed for games, robotics, AI, or any hierarchical task system
+- **Task**: A small, self-contained unit of functionality. Instead of writing one large monolithic program, the logic is split into multiple focused tasks — each responsible for a single, well-defined purpose (monofunctional).
+- **Tree**: A collection of tasks organized and connected via a human-readable script (typically JSON or similar).
+
+## Lifetime of a Task
+
+A task follows the classic lifecycle of a C++ object: **initialization → repeated execution → teardown**.  
+All phases are optional and discovered via **Argument-Dependent Lookup (ADL)**. The task type itself serves as the unique identifier for the associated functions.
+
+The framework supports the following ADL-discovered callables (normal ADL rules apply):
+
+| Function signature                                            | Return type               | When called                                                                 |
+|---------------------------------------------------------------|---------------------------|-----------------------------------------------------------------------------|
+| `TBT::State init((const) Task&, const StateProvider&)`          | `SUCCESS` / `FAILED`      | Once, during task construction                                              |
+| `TBT::State init((const) Task&)`                                | `SUCCESS` / `FAILED`      | Once, during task construction (fallback if the version with `StateProvider` is missing) |
+| `TBT::State run((const) Task&, (const) StateProvider&)`           | `SUCCESS` / `FAILED` / `BUSY` | 1 to n times after `init`                                                       |
+| `TBT::State run((const) Task&)`                                 | `SUCCESS` / `FAILED` / `BUSY` | 1 to n times after `init` (fallback)                                            |
+| `void exit((const) Task&, (const) StateProvider&)`                | `void`                    | Once, when `run` no longer returns `BUSY`                                   |
+| `void exit((const) Task&)`                                      | `void`                    | Once, when `run` no longer returns `BUSY` (fallback)                        |
+
+## Macro Magic (Task Registration)
+
+A core feature of the framework is the automatic collection of all task types into a comma-separated list inside a `std::variant`. True reflection will make this trivial in C++26, but until then we rely on a small build-time trick.
+
+**Important:** Follow the exact pattern below — the include is mandatory.
+
+```cpp
+struct MyTask { };
+#define TASK_TYPE MyTask      // tells the magic which type we are registering
+#include <TBT/magic.hpp>      // must be included exactly here for every task
+```
+The macro + include combination generates the necessary boilerplate so that MyTask appears in the global task variant.
+
+## Requirements
+
+C++23 (required language features)
+The glaze library is used for reflection/metadata handling
+If glaze is not already present, CMake will automatically fetch it with fetchcontent.
+
+No other external dependencies are required.
 
 ## Minimal Example
 
@@ -80,6 +119,7 @@ TBT::State run(const TaskB& t, States& s) {
 // Composing and Running a Tree
 
 // This must appear before main() — collects all registered task types
+// make sure that #include <TBT/magic.hpp> is included at least once in the .cpp file
 using Variant = std::variant<TASK_TYPES>;  // Expands to variant<TaskA, TaskB, ...>
 
 // Global state container (passed to all tasks)
@@ -121,5 +161,131 @@ int main() {
     }
 
     return 0;
+}
+```
+## Data-flow from and into tasks
+A common question is on how to retrieve data from a task without abusing the global state as catch-all blackboard. Following two ways how this can be achieved.
+### Event Queue
+Using an event driven approach is always a good idea.
+```cpp
+template<class Variant>
+TBT::State run(LoadFileFromDiskTask& _task, StateProvider<Variant>& _state){
+    // when the file is loaded we dispatch it over an event queue
+    if(_task.async,wait_for(std::chrono::seconds(0)) == std::future_status::ready){
+        _state.events_.dispatch(FILE_LOADED_EVENT, _task.async.get());
+        return TBT::SUCCESS;
+    }
+    return TBT::BUSY;
+}
+```
+### Shared State
+For longer running tasks or when tasks should share a common state a shared state is an excellent choice.
+```cpp
+//define your state
+std::shared_ptr<TaskState> ptr = std::make_shared...
+//hand the state to all tasks
+COMPILE_AND_QUEUE_FULL_INF("Some($0), Example($0), Tree($0)", state_provider, ptr);
+```
+## Terminating a task/ tree
+When queueing a new task the macro returns a pair containing a std::future<TBT::State> and a iterator to the item in the queue. The iterator can be used to erase the element. Important: Don't erase the element while it is executing, this leads to memory leaks.
+
+```cpp
+    const auto&[future, tree_ptr] = COMPILE_AND_QUEUE_FULL_INF("Some, Example, Tree", state_provider);
+```
+
+Instead terminate the task from inside with return FAILED or wait for termination of the tree.
+
+## Assorted use-case examples
+For all the following examples it is assumed the framework is set up properly. All the trees are assumed to be static. An dynamic implementation would work along the same line.
+### Executing a full tree every frame
+This will run the tree every frame until SUCCESS or FAILED is returned. Be weary of returning BUSY in a task. It might lead to being stuck.
+```cpp
+COMPILE_AND_QUEUE_FULL_INF("Some, Example, Tree", state_provider);
+```
+### Executing a tree node by node a single time
+This will call the tree once every frame until SUCCESS or FAILED is returned. In this case it is perfectly fine to return BUSY.
+```cpp
+COMPILE_AND_QUEUE_STEPWISE_1("Some, Example, Tree", state_provider);
+```
+### Async task using an executor
+This example shows how convenient it to async load a file from disk using Imgui. For example purposes it uses a taskflow executor.
+```cpp
+struct File; //some user defined implementation
+File load_from_disk(const std::filesystem::path& _p); // user defined loading function
+
+//---------------------------------------------------------------
+
+template<class Variant>
+struct StateProvider {
+    //...
+    //the executor
+    tf::Executor executor {8};
+};
+
+struct LoadFileFromDiskTask {
+    std::filesystem::path path_to_file;
+    std:::future<File> async;
+};
+#define TASK_TYPE LoadFileFromDiskTask
+#include <TBT/magic.hpp>
+
+//---------------------------------------------------------------
+
+template<class Variant>
+TBT::State init(LoadFileFromDiskTask& _task, StateProvider<Variant>& _state){
+    _task.async = _state.executor.async([&]() {
+        // there is no danger accessing the task state. 
+        // only the corresponding functions will ever read/ write to it.
+        // in this case only this lambda will read from it. 
+        return load_from_disk(_task.path_to_file);
+    });
+    return TBT::SUCCESS;
+}
+
+template<class Variant>
+TBT::State run(LoadFileFromDiskTask& _task, StateProvider<Variant>& _state){
+    //check if the loading has finished
+    if(_task.async,wait_for(std::chrono::seconds(0)) == std::future_status::ready){
+        auto file = _task.async.get();
+        //do something with the file.
+        return TBT::SUCCESS;
+    }
+    return TBT::BUSY;
+}
+
+//---------------------------------------------------------------
+
+//somewhere in your gui code
+if(Imgui::Button("Load File")){
+    //path from file. for example from file picker.
+    const std::filesystem::path = ...;
+    //move here to avoid a copy
+    COMPILE_AND_QUEUE_STEPWISE_1("LoadFileFromDiskTask($0)", state_provider, std::move(path));
+}
+```
+
+### Waiting for a tree from a tree
+Executing a new tree from a tree is very simple. In fact you can execute any tree from anywhere as long you have a reference to the global states. Let's say we want to run postprocessing async on the file we just loaded and wait on it. Finally, we send it back to the caller.
+```cpp
+template<class Variant>
+TBT::State run(LoadFileFromDiskTask& _task, StateProvider<Variant>& _state){
+    //check if the loading has finished
+    if(!_task.file_loaded_){
+        if(_task.async.wait_for(std::chrono::seconds(0)) == std::future_status::ready){
+            //this is a good usecase for a shared state to make data transfer easier.
+            _task.shared_state_->file_ = _task.async.get();
+            _task.wait_for_pp_ = COMPILE_AND_QUEUE_STEPWISE_1("PostProcessFile($0)", _state, _task.shared_state_);
+            _task.file_loaded_ = true;
+            return TBT::BUSY;
+        }
+    } else {
+        //wait for the new tree to finish
+        if(_task.wait_for_pp_.wait_for(std::chrono::seconds(0)) == std::future_status::ready){
+            // send the finished file back to caller
+            _state.events_.dispatch(FILE_LOADED_EVENT, std::move(_task.shared_state_->file_));
+            return TBT::SUCCESS;
+        }
+    }
+    return TBT::BUSY;
 }
 ```

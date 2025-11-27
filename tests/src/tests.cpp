@@ -119,7 +119,89 @@ TEST_CASE("node list", "[Hierarchy]") {
   const std::array<std::pair<int32_t, std::string_view>, 4> variant = {
       std::make_pair<int32_t, std::string_view>(1, "Task")};
 
-  H_EXTRACT
+  const auto h_extract = [&](std::string_view s) -> std::expected<std::vector<Node>, std::string_view> {
+    std::vector<Node> nodes; /* {level, parent_id} */
+    std::vector<std::pair<int32_t, int32_t>> stack = {{0, 0}};
+    int32_t next_id                                = 1;
+    size_t i                                       = 0;
+
+    const auto parse_node_name                     = [&]() -> std::expected<std::string_view, std::string_view> {
+      size_t start = i;
+      while (i < s.size()) {
+        char c = s[i];
+        if (c == '(' || c == '[' || c == ']' || c == ',') break;
+        ++i;
+      }
+      if (i == start) return std::unexpected("empty node name");
+      return s.substr(start, i - start);
+    };
+
+    const auto parse_params = [&]() -> std::vector<Parameter> {
+      if (i >= s.size() || s[i] != '(') return {};
+      ++i; /* skip '(' */
+      int32_t depth = 1;
+      size_t start  = i;
+      while (i < s.size() && depth > 0) {
+        if (s[i] == '(')
+          ++depth;
+        else if (s[i] == ')')
+          --depth;
+        ++i;
+      }
+      return extract_params(s.substr(start, i - start - 1));
+    };
+
+    const auto get_idx_for_type = [&](const std::string_view& _ss) -> std::optional<size_t> {
+      const auto t = _ss.substr(0, _ss.find_first_of('('));
+      for (size_t i = 0; i < variant.size(); ++i)
+        if (variant[i].second == t) return variant[i].first;
+      return std::nullopt;
+    };
+
+    while (i < s.size()) { /* Parse node name */
+      auto name_res = parse_node_name();
+      if (!name_res) return std::unexpected(name_res.error());
+      std::string_view name = name_res.value();
+
+      Node n;
+      n.cl_      = name;
+      n.node_id_ = next_id++;
+      n.level_   = stack.back().first;
+      n.parent_  = stack.back().second;
+
+      auto idx   = get_idx_for_type(name);
+      if (!idx) return std::unexpected(name);
+      n.type_idx_ = (int32_t)idx.value();
+
+      /* Parse optional parameters */
+      if (i < s.size() && s[i] == '(') { n.p_ = parse_params(); }
+
+      nodes.push_back(std::move(n));
+
+      if (i >= s.size()) break;
+
+      char c = s[i];
+
+      if (c == '[') {
+        stack.push_back({stack.back().first + 1, n.node_id_});
+        ++i;
+      } else if (c == ']') {
+        stack.pop_back();
+        ++i; /* Handle possible consecutive ]]... by continuing */
+        while (i < s.size() && s[i] == ']') {
+          stack.pop_back();
+          ++i;
+        } /* After closing brackets, expect either ',' or end or another node */
+        if (i < s.size() && s[i] == ',') ++i;
+      } else if (c == ',') {
+        ++i;
+      } else {
+        return std::unexpected(s.substr(i, 10)); /* invalid char */
+      }
+    }
+
+    return nodes;
+  };
 
   SECTION("error in task") {
     const std::string input = "Tas";
@@ -504,7 +586,7 @@ struct StateProvider {
   using Variant = Variant_;
   std::vector<std::string> t_;
 
-  TaskQueue tasks_queue_;
+  TBT::TaskQueue<> tasks_queue_;
 };
 
 TEST_CASE("prepare", "[Execute]") {
@@ -526,5 +608,12 @@ TEST_CASE("prepare", "[Execute]") {
   const auto prep2 = COMPILE_AND_PREPARE("TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]", states, -5);
 
   const auto [promise, tree_ptr] =
-      COMPILE_AND_QUEUE("TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]", states, FULL_1, -5);
+      COMPILE_AND_QUEUE(0, "TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]", states, FULL_1, -5);
+
+  // TODO states.tasks_queue_.erase_after(std::prev(tree_ptr));
+
+  while (true) {
+    EXECUTE_QUEUE(states);
+    //
+  }
 }

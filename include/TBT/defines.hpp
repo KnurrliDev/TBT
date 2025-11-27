@@ -90,7 +90,7 @@ namespace TBT {
     };  // Result
 
     struct Node {
-      int16_t type_ = 0xFFFF;
+      int16_t type_ = 0xFF;
       std::shared_ptr<Node> parent_;
       std::vector<std::shared_ptr<Node>> d_;
       std::vector<std::shared_ptr<Node>> c_;

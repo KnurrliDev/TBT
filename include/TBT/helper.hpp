@@ -6,43 +6,62 @@ namespace TBT {
 
   enum ExecutionMode { STEPWISE_1, STEPWISE_INF, FULL_1, FULL_INF };
 
-  using TaskQueue = std::forward_list<std::tuple<ExecutionMode, std::function<TBT::State()>, std::promise<TBT::State>>>;
+  struct ExecutionItem {
+    ExecutionItem()                                = default;
 
-#define EXECUTE_QUEUE(state_provider)                         \
-  if (!states.tasks_queue_.empty()) {                         \
-    auto prev = states.tasks_queue_.before_begin();           \
-    auto curr = states.tasks_queue_.begin();                  \
-    while (true) {                                            \
-      if (!states.tasks_queue_.empty()) {                     \
-        auto prev = states.tasks_queue_.before_begin();       \
-        auto curr = states.tasks_queue_.begin();              \
-        while (curr != states.tasks_queue_.end()) {           \
-          auto& [mode, next, prm] = *curr;                    \
-                                                              \
-          switch (mode) {                                     \
-            case STEPWISE_1: {                                \
-              TBT::State r = next();                          \
-              if (r != TBT::BUSY) {                           \
-                prm.set_value(r);                             \
-                curr = states.tasks_queue_.erase_after(prev); \
-              }                                               \
-            }                                                 \
-            case STEPWISE_INF: {                              \
-              next();                                         \
-            }                                                 \
-            case FULL_1: {                                    \
-              TBT::State r = TBT::State::SUCCESS;             \
-              while ((r = next()) != TBT::BUSY) {}            \
-              prm.set_value(r);                               \
-              curr = states.tasks_queue_.erase_after(prev);   \
-            }                                                 \
-            case FULL_INF: {                                  \
-              while ((next()) != TBT::BUSY) {}                \
-            }                                                 \
-          }                                                   \
-        }                                                     \
-      }                                                       \
-    }                                                         \
+    ExecutionItem(ExecutionItem&&)                 = default;
+    ExecutionItem& operator=(ExecutionItem&&)      = default;
+
+    ExecutionItem(const ExecutionItem&)            = delete;
+    ExecutionItem& operator=(const ExecutionItem&) = delete;
+
+    int32_t priority_                              = 0;
+    ExecutionMode mode_;
+    std::function<TBT::State()> tree_;
+    std::promise<TBT::State> promise_;
+  };  // ExecutionItem
+
+  /*
+    The TaskQueue needs fullfill multiple requirements:
+      > removing items without changing the order
+      > removing items while iterating
+      > sorteable
+      > the items shouldnt be copied around. the lambdas are potentially very heavy
+      > memory fragmentation and pointer chasing can be adressed using an allocator
+  */
+
+  template <class Allocator = std::allocator<ExecutionItem>>
+  using TaskQueue = std::forward_list<ExecutionItem, Allocator>;
+
+#define EXECUTE_QUEUE(state_provider)                                                                         \
+  if (!states.tasks_queue_.empty()) {                                                                         \
+    states.tasks_queue_.sort([](const auto& _v1, const auto& _v2) { return _v1.priority_ > _v2.priority_; }); \
+    auto prev = states.tasks_queue_.before_begin();                                                           \
+    auto curr = states.tasks_queue_.begin();                                                                  \
+    while (curr != states.tasks_queue_.end()) {                                                               \
+      ExecutionItem& item = *curr;                                                                            \
+      switch (item.mode_) {                                                                                   \
+        case STEPWISE_1: {                                                                                    \
+          TBT::State r = item.tree_();                                                                        \
+          if (r != TBT::BUSY) {                                                                               \
+            item.promise_.set_value(r);                                                                       \
+            curr = states.tasks_queue_.erase_after(prev);                                                     \
+          }                                                                                                   \
+        }                                                                                                     \
+        case STEPWISE_INF: {                                                                                  \
+          item.tree_();                                                                                       \
+        }                                                                                                     \
+        case FULL_1: {                                                                                        \
+          TBT::State r = TBT::State::SUCCESS;                                                                 \
+          while ((r = item.tree_()) != TBT::BUSY) {}                                                          \
+          item.promise_.set_value(r);                                                                         \
+          curr = states.tasks_queue_.erase_after(prev);                                                       \
+        }                                                                                                     \
+        case FULL_INF: {                                                                                      \
+          while ((item.tree_()) != TBT::BUSY) {}                                                              \
+        }                                                                                                     \
+      }                                                                                                       \
+    }                                                                                                         \
   }
 
 #define COMPILE_AND_PREPARE(tree, states, ...)                                      \
@@ -56,13 +75,16 @@ namespace TBT {
     return Execute::prepare<Variant>(compile_dynamic<Variant>(_tree), _states, std::forward<Ts>(_ts)...);
   }  // d_compile_and_prepare
 
-#define COMPILE_AND_QUEUE(tree, states, mode, ...)                                                        \
-  [&]() -> auto {                                                                                         \
-    std::promise<TBT::State> prm;                                                                         \
-    std::future<TBT::State> out = prm.get_future();                                                       \
-    const auto ct               = COMPILE_AND_PREPARE(tree, states, __VA_ARGS__);                         \
-    auto& ref                   = states.tasks_queue_.emplace_front(mode, std::move(ct), std::move(prm)); \
-    return std::make_pair(std::move(out), std::ref(ref));                                                 \
+#define COMPILE_AND_QUEUE(priority, tree, states, mode, ...)                                                   \
+  [&]() -> auto {                                                                                              \
+    ExecutionItem item;                                                                                        \
+    item.priority_ = priority;                                                                                 \
+    item.mode_     = mode;                                                                                     \
+    item.tree_     = COMPILE_AND_PREPARE("TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]", states, -5); \
+    std::future<TBT::State> out = item.promise_.get_future();                                                  \
+    auto prev                   = states.tasks_queue_.before_begin();                                          \
+    auto ref                    = states.tasks_queue_.insert_after(prev, std::move(item));                     \
+    return std::make_pair(std::move(out), ref);                                                                \
   }();
 
 #define COMPILE_AND_QUEUE_STEPWISE_1(tree, states, ...) COMPILE_AND_QUEUE(tree, states, STEPWISE_1, __VA_ARGS__)

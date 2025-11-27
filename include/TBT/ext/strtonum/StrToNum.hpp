@@ -26,7 +26,7 @@
 // Returns 1 if a bit was found, 0 otherwise
 // Sets *pIndex to the position of the highest set bit (MSB)
 // Works for 32-bit values
-inline constexpr int portable_bit_scan_reverse(unsigned long* pIndex, unsigned long ulMask) {
+inline constexpr unsigned char portable_bit_scan_reverse(unsigned long* pIndex, unsigned long ulMask) {
   if (ulMask == 0) { return 0; }
 
 #if defined(_MSC_VER)

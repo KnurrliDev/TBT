@@ -312,7 +312,7 @@ TEST_CASE("static node list", "[Hierarchy]") {
   SECTION("static error in task") {
     constexpr auto static_ex = [](const std::string_view& _s) constexpr -> bool {
       F_SPLIT
-      F_CLEAN
+      // F_CLEAN
       F_PARAMS
 
       constexpr std::array<std::pair<int32_t, std::string_view>, 4> variant = {
@@ -632,7 +632,7 @@ struct TaskC {
 using Variant = std::variant<TaskA, TaskB, TaskC>;
 
 TEST_CASE("dynamic extract node list", "[Composite]") {
-  constexpr auto vr            = variant_type_index_name_pairs<Variant>();
+  // constexpr auto vr            = variant_type_index_name_pairs<Variant>();
 
   constexpr std::string_view s = "TaskA($1)[TaskB($2), TaskC($3)] TaskA($4)";
 
@@ -692,7 +692,7 @@ TEST_CASE("dynamic extract node list", "[Composite]") {
 }
 
 TEST_CASE("static extract node list", "[Composite]") {
-  constexpr auto vr            = variant_type_index_name_pairs<Variant>();
+  // constexpr auto vr            = variant_type_index_name_pairs<Variant>();
 
   constexpr std::string_view s = "TaskA($1)[TaskB($2), TaskC($3)] TaskA($4)";
   constexpr size_t r_size      = compute_size_static<Variant>(s);
@@ -815,7 +815,7 @@ void exit(const TaskC& _t, States& _s) {
 TEST_CASE("hierarchy", "[Execute]") {
   using Variant                = std::variant<TaskA, TaskB, TaskC>;
 
-  constexpr auto vr            = variant_type_index_name_pairs<Variant>();
+  // constexpr auto vr            = variant_type_index_name_pairs<Variant>();
 
   constexpr std::string_view s = "TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]";
   constexpr size_t r_size      = compute_size_static<Variant>(s);
@@ -871,7 +871,7 @@ struct StateProvider {
 TEST_CASE("prepare", "[Execute]") {
   using Variant                = std::variant<TaskA, TaskB, TaskC>;
 
-  constexpr auto vr            = variant_type_index_name_pairs<Variant>();
+  // constexpr auto vr            = variant_type_index_name_pairs<Variant>();
 
   constexpr std::string_view s = "TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]";
 
@@ -891,8 +891,8 @@ TEST_CASE("prepare", "[Execute]") {
 
   // TODO states.tasks_queue_.erase_after(std::prev(tree_ptr));
 
-  while (true) {
-    EXECUTE_QUEUE(states);
-    //
-  }
+  // while (true) {
+  EXECUTE_QUEUE(states);
+  //
+  //}
 }

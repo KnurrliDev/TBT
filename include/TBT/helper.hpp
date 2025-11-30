@@ -53,18 +53,22 @@ namespace TBT {
             item.promise_.set_value(r);                                                                            \
             curr = states.tasks_queue_.q_.erase_after(prev);                                                       \
           }                                                                                                        \
+          break;                                                                                                   \
         }                                                                                                          \
         case STEPWISE_INF: {                                                                                       \
           item.tree_();                                                                                            \
+          break;                                                                                                   \
         }                                                                                                          \
         case FULL_1: {                                                                                             \
           TBT::State r = TBT::State::SUCCESS;                                                                      \
           while ((r = item.tree_()) != TBT::BUSY) {}                                                               \
           item.promise_.set_value(r);                                                                              \
           curr = states.tasks_queue_.q_.erase_after(prev);                                                         \
+          break;                                                                                                   \
         }                                                                                                          \
         case FULL_INF: {                                                                                           \
           while ((item.tree_()) != TBT::BUSY) {}                                                                   \
+          break;                                                                                                   \
         }                                                                                                          \
       }                                                                                                            \
     }                                                                                                              \

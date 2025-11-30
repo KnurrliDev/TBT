@@ -891,8 +891,8 @@ TEST_CASE("prepare", "[Execute]") {
 
   // TODO states.tasks_queue_.erase_after(std::prev(tree_ptr));
 
-  // while (true) {
-  //   EXECUTE_QUEUE(states);
-  //   //
-  // }
+  while (true) {
+    EXECUTE_QUEUE(states);
+    //
+  }
 }

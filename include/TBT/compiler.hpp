@@ -2,6 +2,7 @@
 
 #include <TBT/defines.hpp>
 #include <TBT/ext/strtonum/StrToNum.hpp>
+#include <glaze/glaze.hpp>
 
 /*
   Grammar:
@@ -44,7 +45,87 @@ namespace TBT::Compiler {
     }(std::make_index_sequence<N>{});
   }  // variant_type_index_name_pairs
 
-#pragma pack(push, 1)
+  template <class T>
+  consteval size_t real_size() {
+    if constexpr (std::is_arithmetic_v<T>) {
+      return sizeof(T);
+    } else {
+      T dummy;
+      auto tie         = glz::to_tie(dummy);
+      constexpr auto N = glz::reflect<T>::size;
+      size_t out       = 0;
+      for (size_t i = 0; i < N; ++i) {
+        using Tuple                   = std::decay_t<decltype(tie)>;
+        constexpr auto indices        = std::make_index_sequence<glz::tuple_size_v<Tuple>>{};
+        constexpr auto runtime_getter = glz::detail::tuple_runtime_getter<Tuple>(indices);
+        const auto field              = runtime_getter[i](tie);
+        std::visit(
+            [&](const auto& val) {
+              using Field_t = std::remove_pointer_t<std::decay_t<decltype(val)>>;
+              out += sizeof(Field_t);
+            },
+            field);
+      }
+      return out;
+    }
+  }  // real_size
+
+  template <class T, size_t M = real_size<T>>
+  constexpr std::array<uint8_t, M> serialize(const T& _in) {
+    if constexpr (std::is_arithmetic_v<T>) {
+      return std::bit_cast<std::array<uint8_t, M>>(_in);
+    } else {
+      constexpr auto N = glz::reflect<T>::size;
+      auto tie         = glz::to_tie(_in);
+      std::array<uint8_t, M> out;
+      for (size_t i = 0; i < M; ++i) out[i] = (uint8_t)0x0;
+      size_t j = 0;
+      for (size_t i = 0; i < N; ++i) {
+        using Tuple                   = std::decay_t<std::decay_t<decltype(tie)>>;
+        constexpr auto indices        = std::make_index_sequence<glz::tuple_size_v<Tuple>>{};
+        constexpr auto runtime_getter = glz::detail::tuple_runtime_getter<Tuple>(indices);
+        const auto field              = runtime_getter[i](tie);
+        std::visit(
+            [&](const auto& val) {
+              using Field_t = std::remove_pointer_t<std::decay_t<decltype(val)>>;
+              static_assert(std::is_trivially_copyable_v<Field_t>);
+              const auto bytes = std::bit_cast<std::array<uint8_t, sizeof(Field_t)>>(*val);
+              for (size_t k = 0; k < sizeof(Field_t); ++k, ++j) out[j] = bytes[k];
+            },
+            field);
+      }
+      return out;
+    }
+  };  // serialize
+
+  template <class T, size_t N = real_size<T>>
+  constexpr T deserialize(const std::array<uint8_t, N>& _in) {
+    if constexpr (std::is_arithmetic_v<T>) {
+      return std::bit_cast<T>(_in);
+    } else {
+      constexpr auto M = glz::reflect<T>::size;
+      T out;
+      auto tie = glz::to_tie(out);
+      size_t j = 0;
+      for (size_t i = 0; i < M; ++i) {
+        using Tuple                   = std::decay_t<decltype(tie)>;
+        constexpr auto indices        = std::make_index_sequence<glz::tuple_size_v<Tuple>>{};
+        constexpr auto runtime_getter = glz::detail::tuple_runtime_getter<Tuple>(indices);
+        auto field                    = runtime_getter[i](tie);
+        std::visit(
+            [&](auto& val) {
+              using Field_t = std::remove_pointer_t<std::decay_t<decltype(val)>>;
+              static_assert(std::is_trivially_copyable_v<Field_t>);
+              std::array<uint8_t, sizeof(Field_t)> tmp;
+              for (size_t ii = 0; ii < sizeof(Field_t); ++ii) tmp[ii] = _in[j + ii];
+              *val = std::bit_cast<Field_t>(tmp);
+              j += sizeof(Field_t);
+            },
+            field);
+      }
+      return out;
+    }
+  };  // deserialize
 
   struct Composite {
     uintptr_t ptr_   = 0;
@@ -52,11 +133,13 @@ namespace TBT::Compiler {
   };  // Composite
 
   struct Result {
+    // constexpr static size_t real_size_ = real_size<Result>();
     State state_   = State::SUCCESS;
     Direction dir_ = Direction::DOWN;
   };  // Result
 
   struct Header {
+    // constexpr static size_t real_size_ = real_size<Header>();
     uint32_t node_count_;
     uint32_t ptr_;
 
@@ -70,6 +153,7 @@ namespace TBT::Compiler {
   };  // Header
 
   struct NodeHeader {
+    // constexpr static size_t real_size_ = real_size<NodeHeader>();
     int16_t type_idx_         = 0;
     uint32_t parent_          = 0;
 
@@ -84,72 +168,167 @@ namespace TBT::Compiler {
     uint32_t node_size_       = 0;
   };  // NodeHeader
 
-#pragma pack(pop)
+  namespace RealSize {
+    constexpr size_t composite   = real_size<Composite>();
+    constexpr size_t result      = real_size<Result>();
+    constexpr size_t header      = real_size<Header>();
+    constexpr size_t node_header = real_size<NodeHeader>();
+  }  // namespace RealSize
 
-  template <class T, class U>
-  T read(const U* _ptr) {
-    T result;
-    static_assert(std::is_trivially_copyable_v<T>, "T must be trivially copyable");
-    memcpy((void*)&result, (void*)_ptr, sizeof(T));
-    return result;
-  }  // read
+  inline constexpr std::array<uint8_t, RealSize::composite> serialize_composite(const Composite& _in) {
+    return serialize<Composite, RealSize::composite>(_in);
+  }  // serialize_composite
 
-  template <class T, class U>
-  void write(const T& _val, U* _ptr) {
-    static_assert(std::is_trivially_copyable_v<T>, "T must be trivially copyable");
-    memcpy((void*)_ptr, (void*)&_val, sizeof(T));
-  }  // read
+  inline constexpr Composite deserialize_composite(const std::array<uint8_t, RealSize::composite>& _in) {
+    return deserialize<Composite, RealSize::composite>(_in);
+  }  // deserialize_composite
 
-  inline NodeHeader read_node_header(const uint8_t* _node) { return read<NodeHeader>(_node); }  // read_node_header
+  inline constexpr std::array<uint8_t, RealSize::result> serialize_result(const Result& _in) {
+    return serialize<Result, RealSize::result>(_in);
+  }  // serialize_result
 
-  inline void write_global_node_header(const Header& _val, uint8_t* _node) {
-    write(_val, _node);
-  }  // write_global_node_header
+  inline constexpr Result deserialize_result(const std::array<uint8_t, RealSize::result>& _in) {
+    return deserialize<Result, RealSize::result>(_in);
+  }  // deserialize_composite
 
-  inline Header read_global_node_header(const uint8_t* _node) {
-    return read<Header>(_node);
+  inline constexpr std::array<uint8_t, RealSize::header> serialize_header(const Header& _in) {
+    return serialize<Header, RealSize::header>(_in);
+  }  // serialize_header
+
+  inline constexpr Header deserialize_header(const std::array<uint8_t, RealSize::header>& _in) {
+    return deserialize<Header, RealSize::header>(_in);
+  }  // deserialize_composite
+
+  inline constexpr std::array<uint8_t, RealSize::node_header> serialize_node_header(const NodeHeader& _in) {
+    return serialize<NodeHeader, RealSize::node_header>(_in);
+  }  // serialize_node_header
+
+  inline constexpr NodeHeader deserialize_node_header(const std::array<uint8_t, RealSize::node_header>& _in) {
+    return deserialize<NodeHeader, RealSize::node_header>(_in);
+  }  // deserialize_composite
+
+  //--------------------------------------------------
+
+  inline constexpr NodeHeader read_node_header(std::span<const uint8_t> _node) {
+    std::array<uint8_t, RealSize::node_header> tmp;
+    for (size_t i = 0; i < RealSize::node_header; ++i) tmp[i] = _node[i];
+    return deserialize_node_header(tmp);
+  }  // read_node_header
+
+  inline constexpr void write_node_header(const NodeHeader& _val, std::span<uint8_t> _node) {
+    const auto res = serialize_node_header(_val);
+    for (size_t i = 0; i < res.size(); ++i) _node[i] = res[i];
+  }  // write_node_header
+
+  //----------------------------------
+
+  inline constexpr Header read_global_node_header(std::span<const uint8_t> _tree) {
+    std::array<uint8_t, RealSize::header> tmp;
+    for (size_t i = 0; i < RealSize::header; ++i) tmp[i] = _tree[i];
+    return deserialize_header(tmp);
   }  // read_global_node_header
 
-  inline uint32_t read_root_child(const int32_t& _i, const uint8_t* _node) {
-    return read<uint32_t>(_node + sizeof(Header) + _i * sizeof(uint32_t));
+  inline constexpr void write_global_node_header(const Header& _val, std::span<uint8_t> _tree) {
+    const auto res = serialize_header(_val);
+    for (size_t i = 0; i < res.size(); ++i) _tree[i] = res[i];
+  }  // write_global_node_header
+
+  //----------------------------------
+
+  inline uint32_t read_root_child(const int32_t& _i, std::span<const uint8_t> _tree) {
+    std::array<uint8_t, sizeof(uint32_t)> tmp;
+    for (size_t i = 0; i < sizeof(uint32_t); ++i) tmp[i] = _tree[RealSize::header + _i * sizeof(uint32_t) + i];
+    return deserialize<uint32_t, sizeof(uint32_t)>(tmp);
+  }  // read_root_child
+
+  inline constexpr void write_root_child(const int32_t& _i, const uint32_t& _ptr, std::span<uint8_t> _tree) {
+    const auto res = serialize<uint32_t, sizeof(uint32_t)>(_ptr);
+    for (size_t i = 0; i < res.size(); ++i) _tree[RealSize::header + _i * sizeof(uint32_t) + i] = res[i];
+  }  // write_root_child
+
+  //----------------------------------
+
+  inline constexpr uint32_t read_child(const int32_t& _i, std::span<const uint8_t> _node) {
+    std::array<uint8_t, sizeof(uint32_t)> tmp;
+    for (size_t i = 0; i < sizeof(uint32_t); ++i) tmp[i] = _node[RealSize::node_header + _i * sizeof(uint32_t) + i];
+    return deserialize<uint32_t, sizeof(uint32_t)>(tmp);
   }  // read_child
 
-  inline uint32_t read_child(const int32_t& _i, const NodeHeader& _header, const uint8_t* _node) {
-    return read<uint32_t>(_node + _header.children_offset_ + _i * sizeof(uint32_t));
-  }  // read_child
+  inline constexpr void write_child(const int32_t& _i, const uint32_t& _ptr, std::span<uint8_t> _node) {
+    const auto res = serialize<uint32_t, sizeof(uint32_t)>(_ptr);
+    for (size_t i = 0; i < res.size(); ++i) _node[RealSize::node_header + _i * sizeof(uint32_t) + i] = res[i];
+  }  // write_child
 
-  inline Composite read_composite(const NodeHeader& _header, const uint8_t* _node) {
-    return read<Composite>(_node + _header.comp_offset_);
-  }  // read_child
+  //----------------------------------
 
-  inline void write_composite(const Composite& _val, const NodeHeader& _header, uint8_t* _node) {
-    write<Composite>(_val, _node + _header.comp_offset_);
-  }  // read_child
+  inline constexpr Composite read_composite(const NodeHeader& _header, std::span<const uint8_t> _node) {
+    std::array<uint8_t, RealSize::composite> tmp;
+    for (size_t i = 0; i < RealSize::composite; ++i) tmp[i] = _node[_header.comp_offset_ + i];
+    return deserialize_composite(tmp);
+  }  // read_composite
 
-  union Payload {
-    char v1[4];
-    int32_t v2;
-    float v3;
-    uint32_t v4;
-  };
+  inline constexpr void write_composite(const Composite& _val, const NodeHeader& _header, std::span<uint8_t> _node) {
+    const auto res = serialize_composite(_val);
+    for (size_t i = 0; i < res.size(); ++i) _node[_header.comp_offset_ + i] = res[i];
+  }  // write_composite
 
-  [[nodiscard]] inline Parameter read_payload(const int32_t& _i, const NodeHeader& _header, const uint8_t* _node) {
+  //----------------------------------
+
+  inline constexpr Parameter read_payload(const size_t& _i, const NodeHeader& _header, std::span<const uint8_t> _node) {
     constexpr int32_t size = sizeof(uint8_t) + sizeof(int32_t);
 
-    const uint8_t type     = read<uint8_t>(_node + _header.params_offset_ + _i * size);
-    const Payload val      = read<Payload>(_node + _header.params_offset_ + _i * size + sizeof(uint8_t));
+    const uint8_t type     = _node[_header.params_offset_ + _i * size];
 
-    if (type == (pt_bool))
-      return val.v1[0] != 0;
-    else if (type == (pt_int))
-      return val.v2;
-    else if (type == (pt_float))
-      return val.v3;
-    else if (type == (pt_dyn))
-      return val.v4;
+    std::array<uint8_t, sizeof(int32_t)> tmp;
+    for (size_t i = 0; i < sizeof(int32_t); ++i)
+      tmp[i] = _node[_header.params_offset_ + _i * size + sizeof(uint8_t) + i];
+
+    if (type == pt_bool)
+      return deserialize<int32_t, sizeof(int32_t)>(tmp) > 0;
+    else if (type == pt_int)
+      return deserialize<int32_t, sizeof(int32_t)>(tmp);
+    else if (type == pt_float)
+      return deserialize<float, sizeof(int32_t)>(tmp);
+    else if (type == pt_dyn)
+      return deserialize<uint32_t, sizeof(int32_t)>(tmp);
 
     std::unreachable();
   }  // read_payload
+
+  inline constexpr void write_payload(const size_t& _i, const NodeHeader& _header, const Parameter& _param,
+                                      std::span<uint8_t> _node) {
+    constexpr int32_t size = sizeof(uint8_t) + sizeof(int32_t);
+    switch (_param.index()) {
+      case 0: {
+        _node[_header.params_offset_ + _i * size] = pt_bool;
+        const auto res = serialize<int32_t, sizeof(int32_t)>((std::get<bool>(_param) ? 1 : 0));
+        for (size_t i = 0; i < sizeof(int32_t); ++i)
+          _node[_header.params_offset_ + _i * size + sizeof(uint8_t) + i] = res[i];
+        break;
+      }
+      case 1: {
+        _node[_header.params_offset_ + _i * size] = pt_int;
+        const auto res                            = serialize<int32_t, sizeof(int32_t)>(std::get<int32_t>(_param));
+        for (size_t i = 0; i < sizeof(int32_t); ++i)
+          _node[_header.params_offset_ + _i * size + sizeof(uint8_t) + i] = res[i];
+        break;
+      }
+      case 2: {
+        _node[_header.params_offset_ + _i * size] = pt_float;
+        const auto res                            = serialize<float, sizeof(int32_t)>(std::get<float>(_param));
+        for (size_t i = 0; i < sizeof(int32_t); ++i)
+          _node[_header.params_offset_ + _i * size + sizeof(uint8_t) + i] = res[i];
+        break;
+      }
+      case 3: {
+        _node[_header.params_offset_ + _i * size] = pt_dyn;
+        const auto res                            = serialize<uint32_t, sizeof(int32_t)>(std::get<uint32_t>(_param));
+        for (size_t i = 0; i < sizeof(int32_t); ++i)
+          _node[_header.params_offset_ + _i * size + sizeof(uint8_t) + i] = res[i];
+        break;
+      }
+    }
+  }  // write_payload
 
 #define F_SPLIT                                                                                           \
   const auto split = [](const std::string_view& _s, const char _delim) -> std::vector<std::string_view> { \
@@ -355,12 +534,12 @@ namespace TBT::Compiler {
 
     const auto root_children = gather_children(0, nodes);
 
-    size_t out               = sizeof(Header) + root_children.size() * sizeof(uint32_t);
+    size_t out               = RealSize::header + root_children.size() * sizeof(uint32_t);
 
     for (const Node& n : nodes) {
       const auto children = gather_children(n.node_id_, nodes);
-      out += (uint32_t)sizeof(NodeHeader) + (uint16_t)children.size() * sizeof(int32_t) +
-             (uint16_t)n.p_.size() * (1 + sizeof(int32_t)) + sizeof(Composite);
+      out += RealSize::node_header + children.size() * sizeof(int32_t) + n.p_.size() * (1 + sizeof(int32_t)) +
+             RealSize::composite;
     }
 
     return out;
@@ -397,75 +576,43 @@ namespace TBT::Compiler {
     const auto root_children = gather_children(0, nodes);
 
     Header header;
-    header.node_count_        = (int32_t)nodes.size();
+    header.node_count_        = static_cast<decltype(header.node_count_)>(nodes.size());
     header.ptr_               = 0;
-    header.node_count_        = (uint16_t)nodes.size();
-    header.children_count_    = (uint16_t)root_children.size();
-    header.first_node_offset_ = sizeof(Header) + header.children_count_ * sizeof(uint32_t);
+    header.children_count_    = static_cast<decltype(header.children_count_)>(root_children.size());
+    header.first_node_offset_ = RealSize::header + header.children_count_ * sizeof(uint32_t);
 
-    // write global header
-    auto ha                   = std::bit_cast<std::array<uint8_t, sizeof(Header)>>(header);
-    for (size_t i = 0; i < sizeof(Header); ++i) _vals[i] = ha[i];
+    write_global_node_header(header, {_vals.begin(), _vals.end()});
 
     uint32_t ptr = header.first_node_offset_;
     for (Node& n : nodes) {
       NodeHeader nheader;
-      nheader.type_idx_        = (int16_t)n.type_idx_;
+      nheader.type_idx_        = static_cast<decltype(nheader.type_idx_)>(n.type_idx_);
       nheader.parent_          = n.parent_;
 
       const auto children      = gather_children(n.node_id_, nodes);
-      nheader.children_count_  = (uint16_t)children.size();
-      nheader.children_offset_ = ptr + (uint32_t)sizeof(NodeHeader);
+      nheader.children_count_  = static_cast<decltype(nheader.children_count_)>(children.size());
+      nheader.children_offset_ = ptr + static_cast<decltype(nheader.children_offset_)>(RealSize::node_header);
 
-      nheader.params_count_    = (uint16_t)n.p_.size();
+      nheader.params_count_    = static_cast<decltype(nheader.params_count_)>(n.p_.size());
       nheader.params_offset_   = nheader.children_offset_ + nheader.children_count_ * sizeof(int32_t);
 
       nheader.comp_offset_     = nheader.params_offset_ + nheader.params_count_ * (1 + sizeof(int32_t));
 
-      nheader.node_size_       = nheader.comp_offset_ + sizeof(Composite) - ptr;
+      nheader.node_size_       = nheader.comp_offset_ + RealSize::composite - ptr;
 
       n.offset_                = ptr;
       n.size_                  = nheader.node_size_;
 
-      // write header
-      const auto nha           = std::bit_cast<std::array<uint8_t, sizeof(NodeHeader)>>(nheader);
-      for (size_t i = 0; i < sizeof(NodeHeader); ++i) _vals[ptr + i] = nha[i];
+      write_node_header(nheader, {_vals.data() + ptr, nheader.node_size_});
 
-      // write params (5 bytes per param)
-      for (size_t i = 0; i < n.p_.size(); ++i) {
-        const auto& p       = n.p_[i];
-        const size_t offset = nheader.params_offset_ + i * (1 + sizeof(int32_t));
-        std::visit(overloaded(
-                       [&](const bool _p) {
-                         const auto pa     = std::bit_cast<std::array<uint8_t, sizeof(int32_t)>>((int32_t)_p);
-                         _vals[offset]     = pt_bool;
-                         _vals[offset + 1] = pa[0];
-                         for (int32_t i = 1; i < (int32_t)sizeof(int32_t); ++i) _vals[offset + 1 + i] = 0x0;
-                       },
-                       [&](const int32_t _p) {
-                         const auto pa = std::bit_cast<std::array<uint8_t, sizeof(int32_t)>>(_p);
-                         _vals[offset] = pt_int;
-                         for (int32_t i = 0; i < (int32_t)sizeof(int32_t); ++i) _vals[offset + 1 + i] = pa[i];
-                       },
-                       [&](const float _p) {
-                         const auto pa = std::bit_cast<std::array<uint8_t, sizeof(float)>>(_p);
-                         _vals[offset] = pt_float;
-                         for (int32_t i = 0; i < (int32_t)sizeof(float); ++i) _vals[offset + 1 + i] = pa[i];
-                       },
-                       [&](const uint32_t _p) {
-                         const auto pa = std::bit_cast<std::array<uint8_t, sizeof(uint32_t)>>(_p);
-                         _vals[offset] = pt_dyn;
-                         for (int32_t i = 0; i < (int32_t)sizeof(uint32_t); ++i) _vals[offset + 1 + i] = pa[i];
-                       }),
-                   p);
-      }
+      for (size_t i = 0; i < n.p_.size(); ++i)
+        write_payload(i, nheader, n.p_[i], {_vals.data() + ptr, nheader.node_size_});
 
       Composite cmp;
       cmp.cur_idx_ = 0;
       cmp.ptr_     = 0;
 
-      auto cmpa    = std::bit_cast<std::array<uint8_t, sizeof(Composite)>>(cmp);
-      for (size_t i = 0; i < sizeof(Composite); ++i) _vals[nheader.comp_offset_ + i] = cmpa[i];
+      write_composite(cmp, nheader, {_vals.data() + ptr, nheader.node_size_});
 
       ptr += nheader.node_size_;
     }
@@ -473,16 +620,12 @@ namespace TBT::Compiler {
     // link root children
     int32_t cc = 0;
     for (const int32_t id : root_children) {
-      const uint32_t offset = sizeof(Header) + cc * sizeof(uint32_t);
-
       for (const Node& n : nodes) {
         if (id == n.node_id_) {
-          auto cmpa = std::bit_cast<std::array<uint8_t, sizeof(int32_t)>>(n.offset_);
-          for (size_t i = 0; i < sizeof(int32_t); ++i) _vals[offset + i] = cmpa[i];
+          write_root_child(cc, n.offset_, {_vals.begin(), _vals.end()});
           break;
         }
       }
-
       cc++;
     }
 
@@ -490,42 +633,29 @@ namespace TBT::Compiler {
     for (const Node& n : nodes) {
       // parent
       if (n.parent_ != 0) {
-        std::array<uint8_t, sizeof(NodeHeader)> tmp;
-        for (int32_t j = 0; j < (int32_t)sizeof(NodeHeader); ++j) tmp[j] = _vals[n.offset_ + j];
-        NodeHeader tar = std::bit_cast<NodeHeader>(tmp);
-
+        NodeHeader tar = read_node_header({_vals.data() + n.offset_, tar.node_size_});
         for (const auto& nc : nodes) {
           if (nc.node_id_ == n.parent_) {
-            tar.parent_   = nc.offset_;
-
-            const auto ca = std::bit_cast<std::array<uint8_t, sizeof(NodeHeader)>>(tar);
-            for (int32_t j = 0; j < (int32_t)sizeof(NodeHeader); ++j) _vals[n.offset_ + j] = ca[j];
+            tar.parent_ = nc.offset_;
             break;
           }
         }
-
-        const auto nha = std::bit_cast<std::array<uint8_t, sizeof(NodeHeader)>>(tar);
-        for (size_t i = 0; i < sizeof(NodeHeader); ++i) _vals[n.offset_ + i] = nha[i];
+        write_node_header(tar, {_vals.data() + n.offset_, tar.node_size_});
       }
 
-      const uint32_t c_ptr = n.offset_ + (uint32_t)sizeof(NodeHeader);
-
       // children
-      const auto children  = gather_children(n.node_id_, nodes);
+      const auto children = gather_children(n.node_id_, nodes);
       for (size_t i = 0; i < children.size(); ++i) {
         // find node with id
         for (const auto& nc : nodes) {
           if (nc.node_id_ == children[i]) {
-            // write children (4 bytes per child)
-            const auto ca = std::bit_cast<std::array<char, sizeof(int32_t)>>(nc.offset_);
-            for (int32_t j = 0; j < (int32_t)sizeof(int32_t); ++j)
-              _vals[c_ptr + i * (int32_t)sizeof(int32_t) + j] = ca[j];
+            write_child(int32_t(i), nc.offset_, {_vals.data() + n.offset_, _vals.size() - n.offset_});
             break;
           }
         }
       }
     }
-  };
+  }  // compile
 
   template <class Variant>
   [[nodiscard]] DynamicTree compile_dynamic(const std::string_view& _s) {

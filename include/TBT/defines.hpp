@@ -78,9 +78,9 @@ namespace TBT {
 #define SEXPAND(x) #x
 #define SEEXPAND(x) SEXPAND(x)
 
-  enum State : uint8_t { BUSY, FAILED, SUCCESS };
+  enum State : uint32_t { BUSY, FAILED, SUCCESS };
 
-  enum Direction : uint8_t { UP, DOWN };
+  enum Direction : uint32_t { UP, DOWN };
 
   namespace Detail {
 

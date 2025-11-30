@@ -1,7 +1,6 @@
 #pragma once
 
 #include <TBT/compiler.hpp>
-#include <glaze/glaze.hpp>
 
 namespace TBT::Execute {
 
@@ -133,7 +132,7 @@ namespace TBT::Execute {
   }  // construct_task
 
   template <class Variant, class... Ts>
-  [[nodiscard]] Variant* alloc_task(uint16_t _idx, const std::vector<uint32_t>& _idxs,
+  [[nodiscard]] Variant* alloc_task(uint32_t _idx, const std::vector<uint32_t>& _idxs,
                                     const std::vector<std::variant<bool, int32_t, float, uint32_t>>& _pl,
                                     const std::tuple<Ts...>& _params) {
     constexpr size_t variant_size = std::variant_size_v<Variant>;
@@ -159,11 +158,11 @@ namespace TBT::Execute {
   }  // alloc_task
 
   template <class Variant, class StateProvider, class... Ts>
-  State execute_task(uint8_t* _tree, Compiler::Header& _global_header, const Compiler::NodeHeader& _header,
+  State execute_task(std::span<uint8_t> _node, Compiler::Header& _global_header, const Compiler::NodeHeader& _header,
                      StateProvider& _states, const std::tuple<Ts...>& _params) {
     using namespace Compiler;
 
-    Composite task = read_composite(_header, _tree);
+    Composite task = read_composite(_header, _node);
 
     // first time entering the task
     if (_global_header.last_result_.dir_ == DOWN) {
@@ -176,7 +175,7 @@ namespace TBT::Execute {
 
       uint32_t s_pl = 0;
       for (int32_t i = 0; i < _header.params_count_; ++i) {
-        const auto pl = read_payload(i, _header, _tree);
+        const auto pl = read_payload(i, _header, _node);
 
         switch (pl.index()) {
           case 3: {
@@ -260,10 +259,10 @@ namespace TBT::Execute {
             _global_header.ptr_              = _header.parent_;
             _global_header.last_result_.dir_ = UP;
           } else {
-            const uint32_t optr              = read_child(task.cur_idx_, _header, _tree);
+            const uint32_t optr              = read_child(task.cur_idx_, _node);
             _global_header.last_result_.dir_ = DOWN;
             task.cur_idx_++;
-            write_composite(task, _header, _tree);
+            write_composite(task, _header, _node);
             _global_header.ptr_ = optr;
           }
 
@@ -275,7 +274,7 @@ namespace TBT::Execute {
         task.ptr_                          = reinterpret_cast<intptr_t>(state);
         _global_header.last_result_.dir_   = UP;
         _global_header.last_result_.state_ = *res;
-        write_composite(task, _header, _tree);
+        write_composite(task, _header, _node);
         return BUSY;
       }
     }
@@ -291,10 +290,10 @@ namespace TBT::Execute {
           _global_header.ptr_              = _header.parent_;
           _global_header.last_result_.dir_ = UP;
         } else {
-          const uint32_t optr              = read_child(task.cur_idx_, _header, _tree);
+          const uint32_t optr              = read_child(task.cur_idx_, _node);
           _global_header.last_result_.dir_ = DOWN;
           task.cur_idx_++;
-          write_composite(task, _header, _tree);
+          write_composite(task, _header, _node);
           _global_header.ptr_ = optr;
         }
         return _global_header.last_result_.state_;
@@ -349,7 +348,7 @@ namespace TBT::Execute {
     using namespace Compiler;
 
     // read global header
-    Header global_header = read_global_node_header(_tree.data());
+    Header global_header = read_global_node_header({_tree.begin(), _tree.end()});
 
     // if first entry. if yes set the pointer to the first child and reset index
     const bool first_entry =
@@ -360,10 +359,11 @@ namespace TBT::Execute {
     }
 
     // read header of current node
-    const NodeHeader cur_node_header = read_node_header(_tree.data() + global_header.ptr_);
+    const NodeHeader cur_node_header = read_node_header({_tree.begin() + global_header.ptr_, _tree.end()});
 
     assert(cur_node_header.type_idx_ >= 0 || cur_node_header.type_idx_ < (int16_t)std::variant_size_v<Variant>);
-    execute_task<Variant>(_tree.data(), global_header, cur_node_header, _states, _params);
+    execute_task<Variant>({_tree.begin() + global_header.ptr_, cur_node_header.node_size_}, global_header,
+                          cur_node_header, _states, _params);
 
     // check if returned to root
     if (global_header.last_result_.dir_ == UP && global_header.ptr_ == 0) {
@@ -375,20 +375,20 @@ namespace TBT::Execute {
         global_header.child_idx_        = 0;
         global_header.ptr_              = 0;
         global_header.last_result_.dir_ = DOWN;
-        write_global_node_header(global_header, _tree.data());
+        write_global_node_header(global_header, {_tree.begin(), _tree.end()});
         return SUCCESS;
       }
       // proceed to next child
       else {
-        global_header.ptr_              = read_root_child(global_header.child_idx_, _tree.data());
+        global_header.ptr_              = read_root_child(global_header.child_idx_, {_tree.begin(), _tree.end()});
 
         global_header.last_result_.dir_ = DOWN;
-        write_global_node_header(global_header, _tree.data());
+        write_global_node_header(global_header, {_tree.begin(), _tree.end()});
         return BUSY;
       }
     }
 
-    write_global_node_header(global_header, _tree.data());
+    write_global_node_header(global_header, {_tree.begin(), _tree.end()});
     return BUSY;
 
   }  // execute

@@ -108,7 +108,7 @@ function(tbt_target_compile_options target visibility)
             /Zc:__cplusplus         # Correct __cplusplus macro
             /Zc:preprocessor       # New preprocessor (closer to Clang/GCC)
             /EHsc                   # Standard C++ exceptions
-            /bigobj                 
+            /bigobj             
         )
 
         if(TBT_ENABLE_HARDENING)

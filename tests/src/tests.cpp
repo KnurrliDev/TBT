@@ -6,62 +6,6 @@
 using namespace TBT;
 using namespace Compiler;
 
-TEST_CASE("serialize", "[Compiler]") {
-  {
-    constexpr Composite val{42, 42};
-
-    constexpr auto s        = serialize_composite(val);
-    constexpr Composite res = deserialize_composite(s);
-
-    static_assert(val.cur_idx_ == res.cur_idx_);
-    static_assert(val.ptr_ == res.ptr_);
-  }
-
-  {
-    constexpr Result val{State::FAILED, Direction::UP};
-
-    constexpr auto s     = serialize_result(val);
-    constexpr Result res = deserialize_result(s);
-
-    static_assert(val.state_ == res.state_);
-    static_assert(val.dir_ == res.dir_);
-  }
-
-  {
-    constexpr Header val{42, 42, 42, 42, {State::FAILED, Direction::UP}, 42};
-
-    constexpr auto s     = serialize_header(val);
-    constexpr Header res = deserialize_header(s);
-
-    static_assert(val.node_count_ == res.node_count_);
-    static_assert(val.ptr_ == res.ptr_);
-    static_assert(val.ptr_ == res.ptr_);
-    static_assert(val.children_count_ == res.children_count_);
-    static_assert(val.last_result_.state_ == res.last_result_.state_);
-    static_assert(val.last_result_.dir_ == res.last_result_.dir_);
-    static_assert(val.child_idx_ == res.child_idx_);
-  }
-
-  {
-    constexpr NodeHeader val{42, 42, 42, 42, 42, 42, 42, 42};
-
-    constexpr auto s         = serialize_node_header(val);
-    constexpr NodeHeader res = deserialize_node_header(s);
-
-    static_assert(val.type_idx_ == res.type_idx_);
-    static_assert(val.parent_ == res.parent_);
-
-    static_assert(val.children_offset_ == res.children_offset_);
-    static_assert(val.children_count_ == res.children_count_);
-
-    static_assert(val.params_offset_ == res.params_offset_);
-    static_assert(val.params_count_ == res.params_count_);
-
-    static_assert(val.comp_offset_ == res.comp_offset_);
-    static_assert(val.node_size_ == res.node_size_);
-  }
-}
-
 TEST_CASE("string splitting", "[util]") {
   F_SPLIT
 
@@ -385,6 +329,285 @@ TEST_CASE("static node list", "[Hierarchy]") {
   }
 }
 
+TEST_CASE("serialize", "[Compiler]") {
+  SECTION("De/serialize base structs", "[Hierarchy]") {
+    {
+      constexpr Composite val{42, 42};
+
+      constexpr auto s        = serialize_composite(val);
+      constexpr Composite res = deserialize_composite(s);
+
+      static_assert(val.cur_idx_ == res.cur_idx_);
+      static_assert(val.ptr_ == res.ptr_);
+    }
+
+    {
+      constexpr Result val{State::FAILED, Direction::UP};
+
+      constexpr auto s     = serialize_result(val);
+      constexpr Result res = deserialize_result(s);
+
+      static_assert(val.state_ == res.state_);
+      static_assert(val.dir_ == res.dir_);
+    }
+
+    {
+      constexpr Header val{42, 42, 42, 42, {State::FAILED, Direction::UP}, 42};
+
+      constexpr auto s     = serialize_header(val);
+      constexpr Header res = deserialize_header(s);
+
+      static_assert(val.node_count_ == res.node_count_);
+      static_assert(val.ptr_ == res.ptr_);
+      static_assert(val.ptr_ == res.ptr_);
+      static_assert(val.children_count_ == res.children_count_);
+      static_assert(val.last_result_.state_ == res.last_result_.state_);
+      static_assert(val.last_result_.dir_ == res.last_result_.dir_);
+      static_assert(val.child_idx_ == res.child_idx_);
+    }
+
+    {
+      constexpr NodeHeader val{42, 42, 42, 42, 42, 42, 42, 42};
+
+      constexpr auto s         = serialize_node_header(val);
+      constexpr NodeHeader res = deserialize_node_header(s);
+
+      static_assert(val.type_idx_ == res.type_idx_);
+      static_assert(val.parent_ == res.parent_);
+
+      static_assert(val.children_offset_ == res.children_offset_);
+      static_assert(val.children_count_ == res.children_count_);
+
+      static_assert(val.params_offset_ == res.params_offset_);
+      static_assert(val.params_count_ == res.params_count_);
+
+      static_assert(val.comp_offset_ == res.comp_offset_);
+      static_assert(val.node_size_ == res.node_size_);
+    }
+  }
+
+  SECTION("De/serialize arthimetic types", "[Hierarchy]") {
+    {
+      constexpr bool val      = true;
+
+      // bool is encoded as a int32_t to keep in line with the other arithmetic types used
+      constexpr size_t size_v = real_size<decltype(val)>();
+      static_assert(size_v == sizeof(int32_t));
+
+      constexpr auto s_v = serialize<decltype(val), size_v>(val);
+      constexpr auto d_v = deserialize<decltype(val), size_v>(s_v);
+
+      static_assert(val == d_v);
+    }
+
+    {
+      constexpr int32_t val   = -42;
+
+      constexpr size_t size_v = real_size<decltype(val)>();
+      static_assert(size_v == sizeof(int32_t));
+
+      constexpr auto s_v = serialize<decltype(val), size_v>(val);
+      constexpr auto d_v = deserialize<decltype(val), size_v>(s_v);
+
+      static_assert(val == d_v);
+    }
+
+    {
+      constexpr uint32_t val  = 42;
+
+      constexpr size_t size_v = real_size<decltype(val)>();
+      static_assert(size_v == sizeof(int32_t));
+
+      constexpr auto s_v = serialize<decltype(val), size_v>(val);
+      constexpr auto d_v = deserialize<decltype(val), size_v>(s_v);
+
+      static_assert(val == d_v);
+    }
+
+    {
+      constexpr float val     = -42.335f;
+
+      constexpr size_t size_v = real_size<decltype(val)>();
+      static_assert(size_v == sizeof(int32_t));
+
+      constexpr auto s_v = serialize<decltype(val), size_v>(val);
+      constexpr auto d_v = deserialize<decltype(val), size_v>(s_v);
+
+      static_assert(val == d_v);
+    }
+  }
+}
+
+TEST_CASE("serialize helper functions", "[Compiler]") {
+  SECTION("global header") {
+    constexpr Header val{42, 42, 42, 42, {State::BUSY, Direction::UP}, 42};
+    constexpr std::array<uint8_t, RealSize::header> ar = [val]() constexpr {
+      std::array<uint8_t, RealSize::header> out = {};
+      write_global_node_header(val, out);
+      return out;
+    }();
+
+    constexpr Header res = read_global_node_header(ar);
+
+    static_assert(val.node_count_ == res.node_count_);
+    static_assert(val.ptr_ == res.ptr_);
+
+    static_assert(val.children_count_ == res.children_count_);
+    static_assert(val.first_node_offset_ == res.first_node_offset_);
+
+    static_assert(val.last_result_.state_ == res.last_result_.state_);
+    static_assert(val.last_result_.dir_ == res.last_result_.dir_);
+
+    static_assert(val.child_idx_ == res.child_idx_);
+  }
+
+  SECTION("Composite") {
+    constexpr Composite val{42, 42};
+    constexpr std::array<uint8_t, RealSize::composite> ar = [val]() constexpr {
+      std::array<uint8_t, RealSize::composite> out = {};
+      NodeHeader header;
+      header.comp_offset_ = 0;
+      write_composite(val, header, out);
+      return out;
+    }();
+
+    constexpr Composite res = [ar]() constexpr {
+      NodeHeader header;
+      header.comp_offset_ = 0;
+      return read_composite(header, ar);
+    }();
+
+    static_assert(val.ptr_ == res.ptr_);
+    static_assert(val.cur_idx_ == res.cur_idx_);
+  }
+
+  SECTION("NodeHeader") {
+    constexpr NodeHeader val{42, 42, 42, 42, 42, 42, 42, 42};
+    constexpr std::array<uint8_t, RealSize::node_header> ar = [val]() constexpr {
+      std::array<uint8_t, RealSize::node_header> out = {};
+      write_node_header(val, out);
+      return out;
+    }();
+
+    constexpr NodeHeader res = [ar]() constexpr { return read_node_header(ar); }();
+
+    static_assert(val.type_idx_ == res.type_idx_);
+    static_assert(val.parent_ == res.parent_);
+
+    static_assert(val.children_offset_ == res.children_offset_);
+    static_assert(val.children_count_ == res.children_count_);
+
+    static_assert(val.params_offset_ == res.params_offset_);
+    static_assert(val.params_count_ == res.params_count_);
+
+    static_assert(val.comp_offset_ == res.comp_offset_);
+    static_assert(val.node_size_ == res.node_size_);
+  }
+
+  SECTION("root children") {
+    constexpr int32_t c1                                                = 42;
+    constexpr int32_t c2                                                = 43;
+    constexpr int32_t c3                                                = 44;
+    constexpr std::array<uint8_t, RealSize::header + 3 * sizeof(42)> ar = [c1, c2, c3]() constexpr {
+      std::array<uint8_t, RealSize::header + 3 * sizeof(42)> out = {};
+      write_root_child(0, c1, out);
+      write_root_child(1, c2, out);
+      write_root_child(2, c3, out);
+      return out;
+    }();
+
+    constexpr int32_t r_c1 = [ar]() constexpr { return read_root_child(0, ar); }();
+    constexpr int32_t r_c2 = [ar]() constexpr { return read_root_child(1, ar); }();
+    constexpr int32_t r_c3 = [ar]() constexpr { return read_root_child(2, ar); }();
+
+    static_assert(c1 == r_c1);
+    static_assert(c2 == r_c2);
+    static_assert(c3 == r_c3);
+  }
+
+  SECTION("children") {
+    constexpr int32_t c1                                                     = 42;
+    constexpr int32_t c2                                                     = 43;
+    constexpr int32_t c3                                                     = 44;
+    constexpr std::array<uint8_t, RealSize::node_header + 3 * sizeof(42)> ar = [c1, c2, c3]() constexpr {
+      std::array<uint8_t, RealSize::node_header + 3 * sizeof(42)> out = {};
+      write_child(0, c1, out);
+      write_child(1, c2, out);
+      write_child(2, c3, out);
+      return out;
+    }();
+
+    constexpr int32_t r_c1 = [ar]() constexpr { return read_child(0, ar); }();
+    constexpr int32_t r_c2 = [ar]() constexpr { return read_child(1, ar); }();
+    constexpr int32_t r_c3 = [ar]() constexpr { return read_child(2, ar); }();
+
+    static_assert(c1 == r_c1);
+    static_assert(c2 == r_c2);
+    static_assert(c3 == r_c3);
+  }
+
+  SECTION("Payload") {
+    constexpr Parameter p1                                       = true;
+    constexpr Parameter p2                                       = -42.333f;
+    constexpr Parameter p3                                       = int32_t(42);
+    constexpr Parameter p4                                       = uint32_t(42);
+    //
+    constexpr std::array<uint8_t, 4 * real_size<Parameter>()> ar = [p1, p2, p3, p4]() constexpr {
+      NodeHeader header;
+      header.params_offset_                               = 0;
+
+      std::array<uint8_t, 4 * real_size<Parameter>()> out = {};
+
+      write_payload(0, header, p1, out);
+      write_payload(1, header, p2, out);
+      write_payload(2, header, p3, out);
+      write_payload(3, header, p4, out);
+
+      return out;
+    }();
+
+    constexpr Parameter p1r = [ar]() constexpr {
+      NodeHeader header;
+      header.params_offset_ = 0;
+
+      return read_payload(0, header, ar);
+    }();
+
+    static_assert(p1r.index() == 0);
+    static_assert(std::get<0>(p1r) == std::get<0>(p1));
+
+    constexpr Parameter p2r = [ar]() constexpr {
+      NodeHeader header;
+      header.params_offset_ = 0;
+
+      return read_payload(1, header, ar);
+    }();
+
+    static_assert(p2r.index() == 2);
+    static_assert(std::get<2>(p2r) == std::get<2>(p2));
+
+    constexpr Parameter p3r = [ar]() constexpr {
+      NodeHeader header;
+      header.params_offset_ = 0;
+
+      return read_payload(2, header, ar);
+    }();
+
+    static_assert(p3r.index() == 1);
+    static_assert(std::get<1>(p3r) == std::get<1>(p3));
+
+    constexpr Parameter p4r = [ar]() constexpr {
+      NodeHeader header;
+      header.params_offset_ = 0;
+
+      return read_payload(3, header, ar);
+    }();
+
+    static_assert(p4r.index() == 3);
+    static_assert(std::get<3>(p4r) == std::get<3>(p4));
+  }
+}
+
 struct TaskA {
   int32_t val_ = 1;
 };
@@ -427,215 +650,215 @@ TEST_CASE("dynamic extract node list", "[Composite]") {
   REQUIRE(n1.children_count_ == 2);
   REQUIRE(n1.parent_ == 0);
   {
-    const auto pl = read_payload(0, n1, {res.cbegin() + rc0, n1.node_size_});
+    const auto pl = read_payload(0, n1, {res.cbegin() + rc0, res.cend()});
     REQUIRE(pl.index() == 3);
     REQUIRE(std::get<3>(pl) == 1);
   }
 
-  const uint32_t c11  = read_child(0, {res.cbegin() + rc0, n1.node_size_});
-  const uint32_t c12  = read_child(1, {res.cbegin() + rc0, n1.node_size_});
+  const uint32_t c11  = read_child(0, {res.cbegin() + rc0, res.cend()});
+  const uint32_t c12  = read_child(1, {res.cbegin() + rc0, res.cend()});
 
-  const NodeHeader n2 = read_node_header({res.cbegin() + c11, n1.node_size_});
+  const NodeHeader n2 = read_node_header({res.cbegin() + c11, res.cend()});
   REQUIRE(n2.type_idx_ == 1);
   REQUIRE(n2.children_count_ == 0);
   REQUIRE(n2.parent_ != 0);
   {
-    const auto pl = read_payload(0, n2, {res.cbegin() + c11, n1.node_size_});
+    const auto pl = read_payload(0, n2, {res.cbegin() + c11, res.cend()});
     REQUIRE(pl.index() == 3);
     REQUIRE(std::get<3>(pl) == 2);
   }
 
-  const NodeHeader n3 = read_node_header({res.cbegin() + c12, n1.node_size_});
+  const NodeHeader n3 = read_node_header({res.cbegin() + c12, res.cend()});
   REQUIRE(n3.type_idx_ == 2);
   REQUIRE(n3.children_count_ == 0);
   REQUIRE(n3.parent_ == n2.parent_);
   {
-    const auto pl = read_payload(0, n3, {res.cbegin() + c12, n1.node_size_});
+    const auto pl = read_payload(0, n3, {res.cbegin() + c12, res.cend()});
     REQUIRE(pl.index() == 3);
     REQUIRE(std::get<3>(pl) == 3);
   }
 
   //-----------------------------------------
 
-  const NodeHeader n4 = read_node_header({res.cbegin() + rc1, n1.node_size_});
+  const NodeHeader n4 = read_node_header({res.cbegin() + rc1, res.cend()});
   REQUIRE(n4.type_idx_ == 0);
   REQUIRE(n4.children_count_ == 0);
   REQUIRE(n4.parent_ == 0);
   {
-    const auto pl = read_payload(0, n4, {res.cbegin() + rc1, n1.node_size_});
+    const auto pl = read_payload(0, n4, {res.cbegin() + rc1, res.cend()});
     REQUIRE(pl.index() == 3);
     REQUIRE(std::get<3>(pl) == 4);
   }
 }
 
-// TEST_CASE("static extract node list", "[Composite]") {
-//   constexpr auto vr            = variant_type_index_name_pairs<Variant>();
+TEST_CASE("static extract node list", "[Composite]") {
+  constexpr auto vr            = variant_type_index_name_pairs<Variant>();
 
-//   constexpr std::string_view s = "TaskA($1)[TaskB($2), TaskC($3)] TaskA($4)";
-//   constexpr size_t r_size      = compute_size_static<Variant>(s);
-//   constexpr auto res           = compile_static<r_size, Variant>(s);
+  constexpr std::string_view s = "TaskA($1)[TaskB($2), TaskC($3)] TaskA($4)";
+  constexpr size_t r_size      = compute_size_static<Variant>(s);
+  constexpr auto res           = compile_static<r_size, Variant>(s);
 
-//   const auto res1              = compile_dynamic<Variant>(s);
+  const auto res1              = compile_dynamic<Variant>(s);
 
-//   REQUIRE(res.size() == res1.size());
+  REQUIRE(res.size() == res1.size());
 
-//   for (size_t i = 0; i < res.size(); ++i) { REQUIRE(res[i] == res1[i]); }
+  for (size_t i = 0; i < res.size(); ++i) { REQUIRE(res[i] == res1[i]); }
 
-//   const Header gh = read_global_node_header(res);
-//   REQUIRE(gh.node_count_ == 4);
-//   REQUIRE(gh.children_count_ == 2);
+  const Header gh = read_global_node_header(res);
+  REQUIRE(gh.node_count_ == 4);
+  REQUIRE(gh.children_count_ == 2);
 
-//   const uint32_t rc0  = read_root_child(0, res);
-//   const uint32_t rc1  = read_root_child(1, res);
+  const uint32_t rc0  = read_root_child(0, res);
+  const uint32_t rc1  = read_root_child(1, res);
 
-//   const NodeHeader n1 = read_node_header({res.begin() + rc0, res.end()});
-//   REQUIRE(n1.type_idx_ == 0);
-//   REQUIRE(n1.children_count_ == 2);
-//   REQUIRE(n1.parent_ == 0);
-//   {
-//     const auto pl = read_payload(0, n1, {res.begin() + rc0, res.end()});
-//     REQUIRE(pl.index() == 3);
-//     REQUIRE(std::get<3>(pl) == 1);
-//   }
+  const NodeHeader n1 = read_node_header({res.cbegin() + rc0, res.cend()});
+  REQUIRE(n1.type_idx_ == 0);
+  REQUIRE(n1.children_count_ == 2);
+  REQUIRE(n1.parent_ == 0);
+  {
+    const auto pl = read_payload(0, n1, {res.cbegin() + rc0, res.cend()});
+    REQUIRE(pl.index() == 3);
+    REQUIRE(std::get<3>(pl) == 1);
+  }
 
-//   const uint32_t c11  = read_child(0, {res.begin() + rc0, res.end()});
-//   const uint32_t c12  = read_child(1, {res.begin() + rc0, res.end()});
+  const uint32_t c11  = read_child(0, {res.cbegin() + rc0, res.cend()});
+  const uint32_t c12  = read_child(1, {res.cbegin() + rc0, res.cend()});
 
-//   const NodeHeader n2 = read_node_header({res.begin() + c11, res.end()});
-//   REQUIRE(n2.type_idx_ == 1);
-//   REQUIRE(n2.children_count_ == 0);
-//   REQUIRE(n2.parent_ != 0);
-//   {
-//     const auto pl = read_payload(0, n2, {res.begin() + c11, res.end()});
-//     REQUIRE(pl.index() == 3);
-//     REQUIRE(std::get<3>(pl) == 2);
-//   }
+  const NodeHeader n2 = read_node_header({res.cbegin() + c11, res.cend()});
+  REQUIRE(n2.type_idx_ == 1);
+  REQUIRE(n2.children_count_ == 0);
+  REQUIRE(n2.parent_ != 0);
+  {
+    const auto pl = read_payload(0, n2, {res.cbegin() + c11, res.cend()});
+    REQUIRE(pl.index() == 3);
+    REQUIRE(std::get<3>(pl) == 2);
+  }
 
-//   const NodeHeader n3 = read_node_header({res.begin() + c12, res.end()});
-//   REQUIRE(n3.type_idx_ == 2);
-//   REQUIRE(n3.children_count_ == 0);
-//   REQUIRE(n3.parent_ == n2.parent_);
-//   {
-//     const auto pl = read_payload(0, n3, {res.begin() + c12, res.end()});
-//     REQUIRE(pl.index() == 3);
-//     REQUIRE(std::get<3>(pl) == 3);
-//   }
+  const NodeHeader n3 = read_node_header({res.cbegin() + c12, res.cend()});
+  REQUIRE(n3.type_idx_ == 2);
+  REQUIRE(n3.children_count_ == 0);
+  REQUIRE(n3.parent_ == n2.parent_);
+  {
+    const auto pl = read_payload(0, n3, {res.cbegin() + c12, res.cend()});
+    REQUIRE(pl.index() == 3);
+    REQUIRE(std::get<3>(pl) == 3);
+  }
 
-//   //-----------------------------------------
+  //-----------------------------------------
 
-//   const NodeHeader n4 = read_node_header({res.begin() + rc1, res.end()});
-//   REQUIRE(n4.type_idx_ == 0);
-//   REQUIRE(n4.children_count_ == 0);
-//   REQUIRE(n4.parent_ == 0);
-//   {
-//     const auto pl = read_payload(0, n4, {res.begin() + rc1, res.end()});
-//     REQUIRE(pl.index() == 3);
-//     REQUIRE(std::get<3>(pl) == 4);
-//   }
-// }
+  const NodeHeader n4 = read_node_header({res.cbegin() + rc1, res.cend()});
+  REQUIRE(n4.type_idx_ == 0);
+  REQUIRE(n4.children_count_ == 0);
+  REQUIRE(n4.parent_ == 0);
+  {
+    const auto pl = read_payload(0, n4, {res.cbegin() + rc1, res.cend()});
+    REQUIRE(pl.index() == 3);
+    REQUIRE(std::get<3>(pl) == 4);
+  }
+}
 
-// //---------------------------------------
+//---------------------------------------
 
-// template <class States>
-// TBT::State init(const TaskA& _t, States& _s) {
-//   _s.t_.push_back(std::format("init [{}]", _t.val_));
-//   return SUCCESS;
-// }
-// template <class States>
-// TBT::State run(const TaskA& _t, States& _s) {
-//   _s.t_.push_back(std::format("run [{}]", _t.val_));
-//   return SUCCESS;
-// }
-// template <class States>
-// void exit(const TaskA& _t, States& _s) {
-//   _s.t_.push_back(std::format("exit [{}]", _t.val_));
-// }
+template <class States>
+TBT::State init(const TaskA& _t, States& _s) {
+  _s.t_.push_back(std::format("init [{}]", _t.val_));
+  return SUCCESS;
+}
+template <class States>
+TBT::State run(const TaskA& _t, States& _s) {
+  _s.t_.push_back(std::format("run [{}]", _t.val_));
+  return SUCCESS;
+}
+template <class States>
+void exit(const TaskA& _t, States& _s) {
+  _s.t_.push_back(std::format("exit [{}]", _t.val_));
+}
 
-// //---------------------------------------
+//---------------------------------------
 
-// template <class States>
-// TBT::State init(const TaskB& _t, States& _s) {
-//   _s.t_.push_back(std::format("init [{}]", _t.val_));
-//   return SUCCESS;
-// }
-// template <class States>
-// TBT::State run(const TaskB& _t, States& _s) {
-//   _s.t_.push_back(std::format("run [{}]", _t.val_));
-//   return SUCCESS;
-// }
-// template <class States>
-// void exit(const TaskB& _t, States& _s) {
-//   _s.t_.push_back(std::format("exit [{}]", _t.val_));
-// }
+template <class States>
+TBT::State init(const TaskB& _t, States& _s) {
+  _s.t_.push_back(std::format("init [{}]", _t.val_));
+  return SUCCESS;
+}
+template <class States>
+TBT::State run(const TaskB& _t, States& _s) {
+  _s.t_.push_back(std::format("run [{}]", _t.val_));
+  return SUCCESS;
+}
+template <class States>
+void exit(const TaskB& _t, States& _s) {
+  _s.t_.push_back(std::format("exit [{}]", _t.val_));
+}
 
-// //---------------------------------------
+//---------------------------------------
 
-// template <class States>
-// TBT::State init(const TaskC& _t, States& _s) {
-//   _s.t_.push_back(std::format("init [{}]", _t.val_));
-//   return SUCCESS;
-// }
-// template <class States>
-// TBT::State run(TaskC& _t, States& _s) {
-//   if (_t.it_ < 3) {
-//     _s.t_.push_back(std::format("run [{}]", _t.val_));
-//     _t.it_++;
-//     return BUSY;
-//   }
-//   return SUCCESS;
-// }
-// template <class States>
-// void exit(const TaskC& _t, States& _s) {
-//   _s.t_.push_back(std::format("exit [{}]", _t.val_));
-// }
+template <class States>
+TBT::State init(const TaskC& _t, States& _s) {
+  _s.t_.push_back(std::format("init [{}]", _t.val_));
+  return SUCCESS;
+}
+template <class States>
+TBT::State run(TaskC& _t, States& _s) {
+  if (_t.it_ < 3) {
+    _s.t_.push_back(std::format("run [{}]", _t.val_));
+    _t.it_++;
+    return BUSY;
+  }
+  return SUCCESS;
+}
+template <class States>
+void exit(const TaskC& _t, States& _s) {
+  _s.t_.push_back(std::format("exit [{}]", _t.val_));
+}
 
-// TEST_CASE("hierarchy", "[Execute]") {
-//   using Variant                = std::variant<TaskA, TaskB, TaskC>;
+TEST_CASE("hierarchy", "[Execute]") {
+  using Variant                = std::variant<TaskA, TaskB, TaskC>;
 
-//   constexpr auto vr            = variant_type_index_name_pairs<Variant>();
+  constexpr auto vr            = variant_type_index_name_pairs<Variant>();
 
-//   constexpr std::string_view s = "TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]";
-//   constexpr size_t r_size      = compute_size_static<Variant>(s);
-//   constexpr auto res           = compile_static<r_size, Variant>(s);
+  constexpr std::string_view s = "TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]";
+  constexpr size_t r_size      = compute_size_static<Variant>(s);
+  constexpr auto res           = compile_static<r_size, Variant>(s);
 
-//   // const auto res          = compile_dynamic<Variant>(s);
+  // const auto res          = compile_dynamic<Variant>(s);
 
-//   struct States {
-//     std::vector<std::string> t_;
-//   } states;
+  struct States {
+    std::vector<std::string> t_;
+  } states;
 
-//   auto tree = res;
-//   while (Execute::execute_step<Variant>(tree, states, std::make_tuple(-5)) == BUSY) {
-//     //
-//   }
+  auto tree = res;
+  while (Execute::execute_step<Variant>(tree, states, std::make_tuple(-5)) == BUSY) {
+    //
+  }
 
-//   size_t i = 0;
-//   REQUIRE("init [3]" == states.t_[i++]);
-//   REQUIRE("run [3]" == states.t_[i++]);
-//   REQUIRE("run [3]" == states.t_[i++]);
-//   REQUIRE("run [3]" == states.t_[i++]);
-//   REQUIRE("exit [3]" == states.t_[i++]);
-//   REQUIRE("init [-5]" == states.t_[i++]);
-//   REQUIRE("run [-5]" == states.t_[i++]);
-//   REQUIRE("exit [-5]" == states.t_[i++]);
-//   REQUIRE("init [5]" == states.t_[i++]);
-//   REQUIRE("run [5]" == states.t_[i++]);
-//   REQUIRE("exit [5]" == states.t_[i++]);
-//   REQUIRE("init [1]" == states.t_[i++]);
-//   REQUIRE("run [1]" == states.t_[i++]);
-//   REQUIRE("exit [1]" == states.t_[i++]);
-//   REQUIRE("init [2]" == states.t_[i++]);
-//   REQUIRE("run [2]" == states.t_[i++]);
-//   REQUIRE("exit [2]" == states.t_[i++]);
-//   REQUIRE("init [1]" == states.t_[i++]);
-//   REQUIRE("run [1]" == states.t_[i++]);
-//   REQUIRE("exit [1]" == states.t_[i++]);
-//   REQUIRE("init [3]" == states.t_[i++]);
-//   REQUIRE("run [3]" == states.t_[i++]);
-//   REQUIRE("run [3]" == states.t_[i++]);
-//   REQUIRE("run [3]" == states.t_[i++]);
-//   REQUIRE("exit [3]" == states.t_[i++]);
-// }
+  size_t i = 0;
+  REQUIRE("init [3]" == states.t_[i++]);
+  REQUIRE("run [3]" == states.t_[i++]);
+  REQUIRE("run [3]" == states.t_[i++]);
+  REQUIRE("run [3]" == states.t_[i++]);
+  REQUIRE("exit [3]" == states.t_[i++]);
+  REQUIRE("init [-5]" == states.t_[i++]);
+  REQUIRE("run [-5]" == states.t_[i++]);
+  REQUIRE("exit [-5]" == states.t_[i++]);
+  REQUIRE("init [5]" == states.t_[i++]);
+  REQUIRE("run [5]" == states.t_[i++]);
+  REQUIRE("exit [5]" == states.t_[i++]);
+  REQUIRE("init [1]" == states.t_[i++]);
+  REQUIRE("run [1]" == states.t_[i++]);
+  REQUIRE("exit [1]" == states.t_[i++]);
+  REQUIRE("init [2]" == states.t_[i++]);
+  REQUIRE("run [2]" == states.t_[i++]);
+  REQUIRE("exit [2]" == states.t_[i++]);
+  REQUIRE("init [1]" == states.t_[i++]);
+  REQUIRE("run [1]" == states.t_[i++]);
+  REQUIRE("exit [1]" == states.t_[i++]);
+  REQUIRE("init [3]" == states.t_[i++]);
+  REQUIRE("run [3]" == states.t_[i++]);
+  REQUIRE("run [3]" == states.t_[i++]);
+  REQUIRE("run [3]" == states.t_[i++]);
+  REQUIRE("exit [3]" == states.t_[i++]);
+}
 
 template <class Variant_>
 struct StateProvider {
@@ -645,32 +868,31 @@ struct StateProvider {
   TBT::TaskQueue<> tasks_queue_;
 };
 
-// TEST_CASE("prepare", "[Execute]") {
-//   using Variant                = std::variant<TaskA, TaskB, TaskC>;
+TEST_CASE("prepare", "[Execute]") {
+  using Variant                = std::variant<TaskA, TaskB, TaskC>;
 
-//   constexpr auto vr            = variant_type_index_name_pairs<Variant>();
+  constexpr auto vr            = variant_type_index_name_pairs<Variant>();
 
-//   constexpr std::string_view s = "TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]";
+  constexpr std::string_view s = "TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]";
 
-//   StateProvider<Variant> states;
+  StateProvider<Variant> states;
 
-//   const auto prep  = Execute::prepare<Variant>(compile_static<compute_size_static<Variant>(s), Variant>(s), states,
-//   -5);
+  const auto prep  = Execute::prepare<Variant>(compile_static<compute_size_static<Variant>(s), Variant>(s), states, -5);
 
-//   const auto prep0 = Execute::prepare<typename decltype(states)::Variant>(
-//       compile_static<compute_size_static<typename decltype(states)::Variant>(s), typename
-//       decltype(states)::Variant>(s), states, -5);
+  const auto prep0 = Execute::prepare<typename decltype(states)::Variant>(
+      compile_static<compute_size_static<typename decltype(states)::Variant>(s), typename decltype(states)::Variant>(s),
+      states, -5);
 
-//   const auto prep1 = COMPILE_AND_PREPARE(s, states, -5);
-//   const auto prep2 = COMPILE_AND_PREPARE("TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]", states, -5);
+  const auto prep1 = COMPILE_AND_PREPARE(s, states, -5);
+  const auto prep2 = COMPILE_AND_PREPARE("TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]", states, -5);
 
-//   const auto [promise, tree_ptr] =
-//       COMPILE_AND_QUEUE(0, "TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]", states, FULL_1, -5);
+  const auto [promise, tree_ptr] =
+      COMPILE_AND_QUEUE(0, "TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]", states, FULL_1, -5);
 
-//   // TODO states.tasks_queue_.erase_after(std::prev(tree_ptr));
+  // TODO states.tasks_queue_.erase_after(std::prev(tree_ptr));
 
-//   // while (true) {
-//   //   EXECUTE_QUEUE(states);
-//   //   //
-//   // }
-// }
+  // while (true) {
+  //   EXECUTE_QUEUE(states);
+  //   //
+  // }
+}

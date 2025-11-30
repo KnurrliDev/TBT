@@ -47,12 +47,19 @@ namespace TBT::Compiler {
 
   template <class T>
   consteval size_t real_size() {
-    if constexpr (std::is_arithmetic_v<T>) {
-      return sizeof(T);
+    using TT = std::decay_t<T>;
+    static_assert(!std::is_pointer_v<T>, "Pointer not supported.");
+    static_assert(!(std::is_arithmetic_v<TT> && sizeof(TT) > 4), "Only 4 byte types supported.");
+    if constexpr (std::same_as<TT, Parameter>) {
+      return sizeof(uint8_t) + sizeof(size_t);
+    } else if constexpr (std::same_as<TT, bool>) {
+      return sizeof(int32_t);
+    } else if constexpr (std::is_arithmetic_v<T>) {
+      return sizeof(TT);
     } else {
       T dummy;
       auto tie         = glz::to_tie(dummy);
-      constexpr auto N = glz::reflect<T>::size;
+      constexpr auto N = glz::reflect<TT>::size;
       size_t out       = 0;
       for (size_t i = 0; i < N; ++i) {
         using Tuple                   = std::decay_t<decltype(tie)>;
@@ -72,10 +79,15 @@ namespace TBT::Compiler {
 
   template <class T, size_t M = real_size<T>>
   constexpr std::array<uint8_t, M> serialize(const T& _in) {
-    if constexpr (std::is_arithmetic_v<T>) {
+    using TT = std::decay_t<T>;
+    static_assert(!std::is_pointer_v<T>, "Pointer not supported.");
+    static_assert(!(std::is_arithmetic_v<TT> && sizeof(TT) > 4), "Only 4 byte types supported.");
+    if constexpr (std::same_as<TT, bool>) {
+      return std::bit_cast<std::array<uint8_t, M>>((_in ? int32_t(1) : int32_t(0)));
+    } else if constexpr (std::is_arithmetic_v<TT>) {
       return std::bit_cast<std::array<uint8_t, M>>(_in);
     } else {
-      constexpr auto N = glz::reflect<T>::size;
+      constexpr auto N = glz::reflect<TT>::size;
       auto tie         = glz::to_tie(_in);
       std::array<uint8_t, M> out;
       for (size_t i = 0; i < M; ++i) out[i] = (uint8_t)0x0;
@@ -100,10 +112,15 @@ namespace TBT::Compiler {
 
   template <class T, size_t N = real_size<T>>
   constexpr T deserialize(const std::array<uint8_t, N>& _in) {
-    if constexpr (std::is_arithmetic_v<T>) {
-      return std::bit_cast<T>(_in);
+    using TT = std::decay_t<T>;
+    static_assert(!std::is_pointer_v<T>, "Pointer not supported.");
+    static_assert(!(std::is_arithmetic_v<TT> && sizeof(TT) > 4), "Only 4 byte types supported.");
+    if constexpr (std::same_as<TT, bool>) {
+      return (std::bit_cast<int32_t>(_in) > 0);
+    } else if constexpr (std::is_arithmetic_v<TT>) {
+      return std::bit_cast<TT>(_in);
     } else {
-      constexpr auto M = glz::reflect<T>::size;
+      constexpr auto M = glz::reflect<TT>::size;
       T out;
       auto tie = glz::to_tie(out);
       size_t j = 0;
@@ -140,8 +157,8 @@ namespace TBT::Compiler {
 
   struct Header {
     // constexpr static size_t real_size_ = real_size<Header>();
-    uint32_t node_count_;
-    uint32_t ptr_;
+    uint32_t node_count_        = 0;
+    uint32_t ptr_               = 0;
 
     uint16_t children_count_    = 0;
     uint32_t first_node_offset_ = 0;
@@ -209,19 +226,6 @@ namespace TBT::Compiler {
 
   //--------------------------------------------------
 
-  inline constexpr NodeHeader read_node_header(std::span<const uint8_t> _node) {
-    std::array<uint8_t, RealSize::node_header> tmp;
-    for (size_t i = 0; i < RealSize::node_header; ++i) tmp[i] = _node[i];
-    return deserialize_node_header(tmp);
-  }  // read_node_header
-
-  inline constexpr void write_node_header(const NodeHeader& _val, std::span<uint8_t> _node) {
-    const auto res = serialize_node_header(_val);
-    for (size_t i = 0; i < res.size(); ++i) _node[i] = res[i];
-  }  // write_node_header
-
-  //----------------------------------
-
   inline constexpr Header read_global_node_header(std::span<const uint8_t> _tree) {
     std::array<uint8_t, RealSize::header> tmp;
     for (size_t i = 0; i < RealSize::header; ++i) tmp[i] = _tree[i];
@@ -235,7 +239,20 @@ namespace TBT::Compiler {
 
   //----------------------------------
 
-  inline uint32_t read_root_child(const int32_t& _i, std::span<const uint8_t> _tree) {
+  inline constexpr NodeHeader read_node_header(std::span<const uint8_t> _node) {
+    std::array<uint8_t, RealSize::node_header> tmp;
+    for (size_t i = 0; i < RealSize::node_header; ++i) tmp[i] = _node[i];
+    return deserialize_node_header(tmp);
+  }  // read_node_header
+
+  inline constexpr void write_node_header(const NodeHeader& _val, std::span<uint8_t> _node) {
+    const auto res = serialize_node_header(_val);
+    for (size_t i = 0; i < res.size(); ++i) _node[i] = res[i];
+  }  // write_node_header
+
+  //----------------------------------
+
+  inline constexpr uint32_t read_root_child(const int32_t& _i, std::span<const uint8_t> _tree) {
     std::array<uint8_t, sizeof(uint32_t)> tmp;
     for (size_t i = 0; i < sizeof(uint32_t); ++i) tmp[i] = _tree[RealSize::header + _i * sizeof(uint32_t) + i];
     return deserialize<uint32_t, sizeof(uint32_t)>(tmp);
@@ -591,14 +608,14 @@ namespace TBT::Compiler {
 
       const auto children      = gather_children(n.node_id_, nodes);
       nheader.children_count_  = static_cast<decltype(nheader.children_count_)>(children.size());
-      nheader.children_offset_ = ptr + static_cast<decltype(nheader.children_offset_)>(RealSize::node_header);
+      nheader.children_offset_ = static_cast<decltype(nheader.children_offset_)>(RealSize::node_header);
 
       nheader.params_count_    = static_cast<decltype(nheader.params_count_)>(n.p_.size());
       nheader.params_offset_   = nheader.children_offset_ + nheader.children_count_ * sizeof(int32_t);
 
       nheader.comp_offset_     = nheader.params_offset_ + nheader.params_count_ * (1 + sizeof(int32_t));
 
-      nheader.node_size_       = nheader.comp_offset_ + RealSize::composite - ptr;
+      nheader.node_size_       = nheader.comp_offset_ + RealSize::composite;
 
       n.offset_                = ptr;
       n.size_                  = nheader.node_size_;
@@ -633,7 +650,7 @@ namespace TBT::Compiler {
     for (const Node& n : nodes) {
       // parent
       if (n.parent_ != 0) {
-        NodeHeader tar = read_node_header({_vals.data() + n.offset_, tar.node_size_});
+        NodeHeader tar = read_node_header({_vals.data() + n.offset_, n.size_});
         for (const auto& nc : nodes) {
           if (nc.node_id_ == n.parent_) {
             tar.parent_ = nc.offset_;

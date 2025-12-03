@@ -908,6 +908,25 @@ struct TaskD {
 
 template <class States>
 Execute::CoState co_run(const TaskD& _t, States& _s) {
+  std::cout << "Wait start" << std::endl;
+  co_await COMPILE_AND_QUEUE(0, "TaskE", _s, STEPWISE_1);
+  std::cout << "Wait end" << std::endl;
+  co_return SUCCESS;
+}
+
+struct TaskE {
+  int32_t val_ = 5;
+};
+#define TASK_TYPE TaskE
+#include <TBT/magic.hpp>
+
+template <class States>
+Execute::CoState co_run(const TaskE& _t, States& _s) {
+  std::cout << "0" << std::endl;
+  co_yield 0;
+  std::cout << "1" << std::endl;
+  co_yield 0;
+  std::cout << "2" << std::endl;
   co_return SUCCESS;
 }
 
@@ -917,15 +936,52 @@ void exit(const TaskD& _t, States& _s) {
 }
 
 TEST_CASE("co-routines", "[Execute]") {
-  using Variant1               = std::variant<TaskA, TaskB, TaskC, TaskD>;
-
-  // constexpr auto vr            = variant_type_index_name_pairs<Variant>();
-
-  constexpr std::string_view s = "TaskD";
+  using Variant1 = std::variant<TaskA, TaskB, TaskC, TaskD, TaskE>;
 
   StateProvider<Variant1> state_provider;
 
-  auto p = Execute::prepare<Variant1>(compile_static<compute_size_static<Variant1>(s), Variant1>(s), state_provider);
+  auto p = COMPILE_AND_QUEUE(0, "TaskD", state_provider, STEPWISE_1);
 
-  while (p() == BUSY) {}
+  for (int32_t i = 0; i < 1000; ++i) {
+    if (!state_provider.tasks_queue_.q_.empty()) {
+      if (state_provider.tasks_queue_.dirty_) {
+        state_provider.tasks_queue_.dirty_ = false;
+        state_provider.tasks_queue_.q_.sort(
+            [](const auto& _v1, const auto& _v2) { return _v1.priority_ > _v2.priority_; });
+      }
+      auto prev = state_provider.tasks_queue_.q_.before_begin();
+      auto curr = state_provider.tasks_queue_.q_.begin();
+      while (curr != state_provider.tasks_queue_.q_.end()) {
+        ExecutionItem& item = *curr;
+        switch (item.mode_) {
+          case STEPWISE_1: {
+            TBT::State r = item.tree_();
+            if (r != TBT::BUSY) {
+              item.promise_.set_value(r);
+              if (item.values_)  //
+                item.values_->a_done_ = true;
+              curr = state_provider.tasks_queue_.q_.erase_after(prev);
+            }
+            break;
+          }
+          case STEPWISE_INF: {
+            item.tree_();
+            break;
+          }
+          case FULL_1: {
+            TBT::State r = TBT::State::SUCCESS;
+            while ((r = item.tree_()) != TBT::BUSY) {}
+            item.promise_.set_value(r);
+            curr = state_provider.tasks_queue_.q_.erase_after(prev);
+            break;
+          }
+          case FULL_INF: {
+            while ((item.tree_()) != TBT::BUSY) {}
+            break;
+          }
+        }
+        if (curr != state_provider.tasks_queue_.q_.end()) curr++;
+      }
+    }
+  }
 }

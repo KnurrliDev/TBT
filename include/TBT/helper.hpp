@@ -15,7 +15,8 @@ namespace TBT {
     ExecutionItem(const ExecutionItem&)            = delete;
     ExecutionItem& operator=(const ExecutionItem&) = delete;
 
-    int32_t priority_                              = 0;
+    std::shared_ptr<Execute::CoStateValues> values_;
+    int32_t priority_ = 0;
     ExecutionMode mode_;
     std::function<TBT::State()> tree_;
     std::promise<TBT::State> promise_;
@@ -24,9 +25,8 @@ namespace TBT {
   template <class Allocator = std::allocator<ExecutionItem>>
   using TreeRef = typename std::forward_list<ExecutionItem, Allocator>::iterator;
 
-  template <class Allocator = std::allocator<ExecutionItem>>
+  template <class T, class Allocator = std::allocator<T>>
   struct TreeAwaitable {
-    bool done_ = false;
     std::future<TBT::State> future_;
     std::coroutine_handle<State> handle_;
     TreeRef<Allocator> ref_;
@@ -109,10 +109,10 @@ namespace TBT {
 #ifdef __INTELLISENSE__
 #define COMPILE_AND_PREPARE(...) []() -> std::function<State()> { return []() { return SUCCESS; }; }();
 #else
-#define COMPILE_AND_PREPARE(tree, states, ...)                                      \
-  Execute::prepare<typename decltype(states)::Variant>(                             \
-      compile_static<compute_size_static<typename decltype(states)::Variant>(tree), \
-                     typename decltype(states)::Variant>(tree),                     \
+#define COMPILE_AND_PREPARE(tree, states, ...)                                                    \
+  Execute::prepare<typename std::decay_t<decltype(states)>::Variant>(                             \
+      compile_static<compute_size_static<typename std::decay_t<decltype(states)>::Variant>(tree), \
+                     typename std::decay_t<decltype(states)>::Variant>(tree),                     \
       states __VA_OPT__(, ) __VA_ARGS__);
 #endif
 
@@ -126,23 +126,24 @@ namespace TBT {
     ExecutionItem item;                                                                                      \
     item.priority_                     = priority;                                                           \
     item.mode_                         = mode;                                                               \
-    item.tree_                         = COMPILE_AND_PREPARE(tree, states, __VA_ARGS__);                     \
+    item.tree_                         = COMPILE_AND_PREPARE(tree, state_provider, __VA_ARGS__);             \
     state_provider.tasks_queue_.dirty_ = true;                                                               \
     std::future<TBT::State> f          = item.promise_.get_future();                                         \
     auto prev                          = state_provider.tasks_queue_.q_.before_begin();                      \
     auto ref                           = state_provider.tasks_queue_.q_.insert_after(prev, std::move(item)); \
-    TreeAwaitable out;                                                                                       \
+    TreeAwaitable<ExecutionItem> out;                                                                        \
     out.future_ = std::move(f);                                                                              \
     out.ref_    = ref;                                                                                       \
     return out;                                                                                              \
   }();
 
-#define COMPILE_AND_QUEUE_STEPWISE_1(tree, state_provider, ...) \
-  COMPILE_AND_QUEUE(tree, state_provider, STEPWISE_1, __VA_ARGS__)
-#define COMPILE_AND_QUEUE_STEPWISE_INF(tree, state_provider, ...) \
-  COMPILE_AND_QUEUE(tree, state_provider, STEPWISE_INF, __VA_ARGS__)
-#define COMPILE_AND_QUEUE_FULL_1(tree, state_provider, ...) COMPILE_AND_QUEUE(tree, state_provider, FULL_1, __VA_ARGS__)
-#define COMPILE_AND_QUEUE_FULL_INF(tree, state_provider, ...) \
-  COMPILE_AND_QUEUE(tree, state_provider, FULL_INF, __VA_ARGS__)
+#define COMPILE_AND_QUEUE_STEPWISE_1(priority, tree, state_provider, ...) \
+  COMPILE_AND_QUEUE(priority, tree, state_provider, STEPWISE_1, __VA_ARGS__)
+#define COMPILE_AND_QUEUE_STEPWISE_INF(priority, tree, state_provider, ...) \
+  COMPILE_AND_QUEUE(priority, tree, state_provider, STEPWISE_INF, __VA_ARGS__)
+#define COMPILE_AND_QUEUE_FULL_1(priority, tree, state_provider, ...) \
+  COMPILE_AND_QUEUE(priority, tree, state_provider, FULL_1, __VA_ARGS__)
+#define COMPILE_AND_QUEUE_FULL_INF(priority, tree, state_provider, ...) \
+  COMPILE_AND_QUEUE(priority, tree, state_provider, FULL_INF, __VA_ARGS__)
 
 }  // namespace TBT

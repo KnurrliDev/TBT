@@ -2,72 +2,92 @@
 
 #include <TBT/compiler.hpp>
 
-namespace TBT::Execute {
+namespace TBT {
+  template <class T, class Allocator>
+  struct TreeAwaitable;
+}
 
-  // template <class Awaitable>
-  // concept has_done_sig = requires(Awaitable a) {
-  //   { a.done() } -> std::same_as<bool>;
-  // };
+namespace TBT::Execute {
 
   enum CoStateState { YIELD, RETURN, AWAIT };
 
   template <class Awaitable>
-  struct CoStateAwaitable {
-    Awaitable other_;
-    std::function<bool()> is_done_;
-    bool await_ready() noexcept { return false; }
-    void await_suspend(const std::coroutine_handle<State>&) {}
-    void await_resume() noexcept { is_done_(); }
-    explicit CoStateAwaitable(Awaitable&& _other) : other_(std::forward<Awaitable>(_other)) {}
-  };
+  struct CoStateAwaitable;
+
+  struct CoStateValues {
+    State val_;
+    CoStateState state_;
+    std::exception_ptr exception_;
+    bool a_done_ = false;
+  };  // CoStateValues
 
   struct CoState {
     struct promise_type {
-      State val_;
-      CoStateState state;
-      std::exception_ptr exception_;
-      bool a_done_ = false;
+      std::shared_ptr<CoStateValues> values_;
 
-      CoState get_return_object() noexcept { return CoState{handle::from_promise(*this)}; }
+      CoState get_return_object() {
+        values_ = std::make_shared<CoStateValues>();
+        return CoState(values_, std::coroutine_handle<CoState::promise_type>::from_promise(*this));
+      }
 
       std::suspend_never initial_suspend() noexcept { return {}; }
       std::suspend_never final_suspend() noexcept { return {}; }
 
-      std::suspend_always yield_value(const State _val) {
-        state = CoStateState::YIELD;
-        val_  = _val;
+      template <class T>
+      std::suspend_always yield_value(T&&) {
+        values_->state_ = CoStateState::YIELD;
+        values_->val_   = BUSY;
         return {};
       }
 
       void return_value(const State _val) noexcept {
-        state = CoStateState::RETURN;
-        val_  = _val;
+        values_->state_ = CoStateState::RETURN;
+        values_->val_   = _val;
       }
 
-      void unhandled_exception() noexcept { exception_ = std::current_exception(); }
+      void unhandled_exception() noexcept { values_->exception_ = std::current_exception(); }
 
-      template <class Awaitable>
-      CoStateAwaitable<Awaitable> await_transform(Awaitable&& _a) {
-        state = CoStateState::AWAIT;
-        CoStateAwaitable<Awaitable> out(std::move(_a));
-        out.is_done_ = [&a_done_]() { a_done_ = true; };
+      // template <class Awaitable>
+      // CoStateAwaitable<Awaitable> await_transform(Awaitable&& _a) {
+      //   values_->state_ = CoStateState::AWAIT;
+      //   CoStateAwaitable<Awaitable> out(std::move(_a));
+      //   out.values_ = values_;
+      //   return out;
+      // };
+
+      template <class T, class Allocator>
+      CoStateAwaitable<TreeAwaitable<T, Allocator>> await_transform(TreeAwaitable<T, Allocator>&& _a) {
+        values_->state_  = CoStateState::AWAIT;
+        _a.ref_->values_ = values_;
+        CoStateAwaitable<TreeAwaitable<T, Allocator>> out(std::move(_a));
+        out.values_ = values_;
         return out;
       };
 
-      State get_value() { return val_; }
-      CoStateState get_costate() { return state; }
-      bool is_awaitable_done() { return a_done_; }
-
-      using handle = std::coroutine_handle<promise_type>;
     };  // promise_type
-    using Handle_t = typename promise_type::handle;
 
-    Handle_t handle_;
+    std::shared_ptr<CoStateValues> values_;
+    std::coroutine_handle<CoState::promise_type> handle_;
 
     CoState() = default;
-    explicit CoState(Handle_t _h) : handle_(_h) {}
+    explicit CoState(std::shared_ptr<CoStateValues> _values, std::coroutine_handle<CoState::promise_type> _handle)
+        : values_(std::move(_values)), handle_(std::move(_handle)) {}
+
+    State get_value() { return values_->val_; }
+    CoStateState get_costate() { return values_->state_; }
+    bool is_awaitable_done() { return values_->a_done_; }
 
   };  // CoState
+
+  template <class Awaitable>
+  struct CoStateAwaitable {
+    Awaitable other_;
+    std::shared_ptr<CoStateValues> values_;
+    bool await_ready() noexcept { return false; }
+    void await_suspend(const std::coroutine_handle<CoState::promise_type>&) {}
+    void await_resume() noexcept {}
+    explicit CoStateAwaitable(Awaitable&& _other) : other_(std::forward<Awaitable>(_other)) {}
+  };
 
   namespace Concepts {
 
@@ -296,21 +316,21 @@ namespace TBT::Execute {
         CoState cstate;
         std::visit(
             [&](auto& _t) {
-              if constexpr (Concepts::has_corun_sig_1<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
+              if constexpr (Concepts::has_corun_sig_1<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>) {
                 cstate = co_run(_t, _states);
-              else if constexpr (Concepts::has_corun_sig_2<std::decay_t<decltype(_t)>>)
+              } else if constexpr (Concepts::has_corun_sig_2<std::decay_t<decltype(_t)>>) {
                 cstate = co_run(_t);
+              }
             },
             *state);
 
         // check the state of the coroutine
-        auto& prms             = cstate.handle_.promise();
-        const CoStateState res = prms.get_costate();
+        const CoStateState res = cstate.get_costate();
 
         switch (res) {
           case YIELD: {
             // the tasks wants to wait. write states and return.
-            const State value = prms.get_value();
+            const State value = cstate.get_value();
             assert(value == BUSY);
             task.ptr_                          = reinterpret_cast<intptr_t>(state);
             task.co_                           = reinterpret_cast<intptr_t>(cstate.handle_.address());
@@ -321,8 +341,10 @@ namespace TBT::Execute {
           }
           case RETURN: {  // the coroutine has co_returned
             delete state;
+            task.ptr_         = 0;
+            task.co_          = 0;
             // cres.coro_.destroy();
-            const State value = prms.get_value();
+            const State value = cstate.get_value();
             // return to parent if no children or last child or failed
             if (value == FAILED || task.cur_idx_ >= _header.children_count_) {
               task.cur_idx_                    = 0;
@@ -332,9 +354,9 @@ namespace TBT::Execute {
               const uint32_t optr              = read_child(task.cur_idx_, _node);
               _global_header.last_result_.dir_ = DOWN;
               task.cur_idx_++;
-              write_composite(task, _header, _node);
               _global_header.ptr_ = optr;
             }
+            write_composite(task, _header, _node);
             _global_header.last_result_.state_ = value;
             return BUSY;
           }
@@ -376,6 +398,10 @@ namespace TBT::Execute {
                 *state);
 
             delete state;
+            task.ptr_ = 0;
+            task.co_  = 0;
+            write_composite(task, _header, _node);
+
             _global_header.ptr_                = _header.parent_;
             _global_header.last_result_.dir_   = UP;
             _global_header.last_result_.state_ = res;
@@ -410,6 +436,8 @@ namespace TBT::Execute {
                 *state);
 
             delete state;
+            task.ptr_ = 0;
+            task.co_  = 0;
 
             // return to parent if no children or last child
             if (*res == FAILED || task.cur_idx_ >= _header.children_count_) {
@@ -420,9 +448,9 @@ namespace TBT::Execute {
               const uint32_t optr              = read_child(task.cur_idx_, _node);
               _global_header.last_result_.dir_ = DOWN;
               task.cur_idx_++;
-              write_composite(task, _header, _node);
               _global_header.ptr_ = optr;
             }
+            write_composite(task, _header, _node);
 
             // either wait has returned a state or the state must be success from run
             _global_header.last_result_.state_ = res ? *res : SUCCESS;
@@ -440,22 +468,24 @@ namespace TBT::Execute {
 
     //------------------------------------------------------------
 
-    // re enter. either the task returned BUSY or returning from a child
+    // re enter. either the task returned BUSY or returning from a child or coyielded or coawaited
     else {
       // returning from a child. go to next or return to parent
-      if (_global_header.last_result_.state_ != State::BUSY) {
-        if (task.cur_idx_ >= _header.children_count_) {
-          task.cur_idx_                    = 0;
-          _global_header.ptr_              = _header.parent_;
-          _global_header.last_result_.dir_ = UP;
-        } else {
-          const uint32_t optr              = read_child(task.cur_idx_, _node);
-          _global_header.last_result_.dir_ = DOWN;
-          task.cur_idx_++;
-          write_composite(task, _header, _node);
-          _global_header.ptr_ = optr;
+      if (task.ptr_ == 0) {
+        if (_global_header.last_result_.state_ != State::BUSY) {
+          if (task.cur_idx_ >= _header.children_count_) {
+            task.cur_idx_                    = 0;
+            _global_header.ptr_              = _header.parent_;
+            _global_header.last_result_.dir_ = UP;
+          } else {
+            const uint32_t optr              = read_child(task.cur_idx_, _node);
+            _global_header.last_result_.dir_ = DOWN;
+            task.cur_idx_++;
+            write_composite(task, _header, _node);
+            _global_header.ptr_ = optr;
+          }
+          return _global_header.last_result_.state_;
         }
-        return _global_header.last_result_.state_;
       }
 
       // keep running the task
@@ -476,31 +506,33 @@ namespace TBT::Execute {
         assert(task.co_ != 0);
 
         auto co_handle = std::coroutine_handle<CoState::promise_type>::from_address(reinterpret_cast<void*>(task.co_));
-        auto& prms     = co_handle.promise();
+        CoState co_state(co_handle.promise().values_, co_handle);
 
         // check last costate
-        const CoStateState res_prev = prms.get_costate();
+        const CoStateState res_prev = co_state.get_costate();
         assert(res_prev != RETURN);
 
         switch (res_prev) {
           case YIELD:  // coninue execution
           {
             co_handle.resume();
+            break;
           }
           case AWAIT:  // continue if the awaitable has finished
           {
-            const bool a_done = prms.is_awaitable_done();
+            const bool a_done = co_state.is_awaitable_done();
             if (a_done) co_handle.resume();
+            break;
           }
         }
 
         // check the coroutine after resuming
-        const CoStateState res_after = prms.get_costate();
+        const CoStateState res_after = co_state.get_costate();
 
         switch (res_after) {
           case YIELD: {
             // the tasks wants to wait. write states and return.
-            const State value = prms.get_value();
+            const State value = co_state.get_value();
             assert(value == BUSY);
             _global_header.last_result_.dir_   = UP;
             _global_header.last_result_.state_ = value;
@@ -508,8 +540,10 @@ namespace TBT::Execute {
           }
           case RETURN: {  // the coroutine has co_returned
             delete state;
+            task.ptr_         = 0;
+            task.co_          = 0;
             // cres.coro_.destroy();
-            const State value = prms.get_value();
+            const State value = co_state.get_value();
             // return to parent if no children or last child or failed
             if (value == FAILED || task.cur_idx_ >= _header.children_count_) {
               task.cur_idx_                    = 0;
@@ -519,9 +553,9 @@ namespace TBT::Execute {
               const uint32_t optr              = read_child(task.cur_idx_, _node);
               _global_header.last_result_.dir_ = DOWN;
               task.cur_idx_++;
-              write_composite(task, _header, _node);
               _global_header.ptr_ = optr;
             }
+            write_composite(task, _header, _node);
             _global_header.last_result_.state_ = value;
             return BUSY;
           }
@@ -558,6 +592,8 @@ namespace TBT::Execute {
               *state);
 
           delete state;
+          task.ptr_ = 0;
+          task.co_  = 0;
 
           // return to parent if no children or last child
           if (res == FAILED || task.cur_idx_ >= _header.children_count_) {
@@ -568,10 +604,10 @@ namespace TBT::Execute {
             const uint32_t optr              = read_child(task.cur_idx_, _node);
             _global_header.last_result_.dir_ = DOWN;
             task.cur_idx_++;
-            write_composite(task, _header, _node);
             _global_header.ptr_ = optr;
           }
 
+          write_composite(task, _header, _node);
           // either wait has returned a state or the state must be success from run
           _global_header.last_result_.state_ = res;
           return BUSY;

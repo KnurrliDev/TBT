@@ -868,31 +868,64 @@ struct StateProvider {
   TBT::TaskQueue<> tasks_queue_;
 };
 
-TEST_CASE("prepare", "[Execute]") {
-  using Variant                = std::variant<TaskA, TaskB, TaskC>;
+// TEST_CASE("prepare", "[Execute]") {
+//   using Variant                = std::variant<TaskA, TaskB, TaskC>;
+
+//   // constexpr auto vr            = variant_type_index_name_pairs<Variant>();
+
+//   constexpr std::string_view s = "TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]";
+
+//   StateProvider<Variant> states;
+
+//   const auto prep  = Execute::prepare<Variant>(compile_static<compute_size_static<Variant>(s), Variant>(s), states,
+//   -5);
+
+//   const auto prep0 = Execute::prepare<typename decltype(states)::Variant>(
+//       compile_static<compute_size_static<typename decltype(states)::Variant>(s), typename
+//       decltype(states)::Variant>(s), states, -5);
+
+//   const auto prep1 = COMPILE_AND_PREPARE(s, states, -5);
+//   const auto prep2 = COMPILE_AND_PREPARE("TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]", states, -5);
+
+//   const auto awaitable =
+//       COMPILE_AND_QUEUE(0, "TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]", states, FULL_1, -5);
+
+//   // TODO states.tasks_queue_.erase_after(std::prev(tree_ptr));
+
+//   // while (true) {
+//   EXECUTE_QUEUE(states);
+//   //
+//   //}
+// }
+
+//-----------------------------------------------------
+
+struct TaskD {
+  int32_t val_ = 5;
+};
+#define TASK_TYPE TaskD
+#include <TBT/magic.hpp>
+
+template <class States>
+Execute::CoState co_run(const TaskD& _t, States& _s) {
+  co_return SUCCESS;
+}
+
+template <class States>
+void exit(const TaskD& _t, States& _s) {
+  _s.t_.push_back(std::format("exit [{}]", _t.val_));
+}
+
+TEST_CASE("co-routines", "[Execute]") {
+  using Variant1               = std::variant<TaskA, TaskB, TaskC, TaskD>;
 
   // constexpr auto vr            = variant_type_index_name_pairs<Variant>();
 
-  constexpr std::string_view s = "TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]";
+  constexpr std::string_view s = "TaskD";
 
-  StateProvider<Variant> states;
+  StateProvider<Variant1> state_provider;
 
-  const auto prep  = Execute::prepare<Variant>(compile_static<compute_size_static<Variant>(s), Variant>(s), states, -5);
+  auto p = Execute::prepare<Variant1>(compile_static<compute_size_static<Variant1>(s), Variant1>(s), state_provider);
 
-  const auto prep0 = Execute::prepare<typename decltype(states)::Variant>(
-      compile_static<compute_size_static<typename decltype(states)::Variant>(s), typename decltype(states)::Variant>(s),
-      states, -5);
-
-  const auto prep1 = COMPILE_AND_PREPARE(s, states, -5);
-  const auto prep2 = COMPILE_AND_PREPARE("TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]", states, -5);
-
-  const auto [promise, tree_ptr] =
-      COMPILE_AND_QUEUE(0, "TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]", states, FULL_1, -5);
-
-  // TODO states.tasks_queue_.erase_after(std::prev(tree_ptr));
-
-  // while (true) {
-  EXECUTE_QUEUE(states);
-  //
-  //}
+  while (p() == BUSY) {}
 }

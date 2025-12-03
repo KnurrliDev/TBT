@@ -21,6 +21,39 @@ namespace TBT {
     std::promise<TBT::State> promise_;
   };  // ExecutionItem
 
+  template <class Allocator = std::allocator<ExecutionItem>>
+  using TreeRef = typename std::forward_list<ExecutionItem, Allocator>::iterator;
+
+  template <class Allocator = std::allocator<ExecutionItem>>
+  struct TreeAwaitable {
+    bool done_ = false;
+    std::future<TBT::State> future_;
+    std::coroutine_handle<State> handle_;
+    TreeRef<Allocator> ref_;
+
+    bool await_ready() noexcept { return false; }
+    void await_suspend(const std::coroutine_handle<State>&) {}
+    State await_resume() noexcept { return future_.get(); }
+
+  };  // TreeAwaitable
+
+  // template <class T>
+  // struct Awaitable {
+  //   T val_;
+  //   bool done_ = false;
+  //   std::function<void()> func_;
+
+  //   explicit Awaitable(std::function<void()> _func)::func_(std:: : move(_func)) {}
+
+  //   bool await_ready() noexcept { return false; }
+  //   void await_suspend(const std::coroutine_handle<State>&) {
+  //     func_();
+  //     done_ = true;
+  //   }
+  //   T await_resume() noexcept { return val_; }
+
+  // };  // Awaitable
+
   /*
     The TaskQueue needs fullfill multiple requirements:
       > removing items without changing the order
@@ -81,24 +114,27 @@ namespace TBT {
       compile_static<compute_size_static<typename decltype(states)::Variant>(tree), \
                      typename decltype(states)::Variant>(tree),                     \
       states __VA_OPT__(, ) __VA_ARGS__);
+#endif
 
   template <class Variant, class Tree, class StateProvider, class... Ts>
   [[nodiscard]] auto compile_and_prepare(const std::string_view& _tree, StateProvider& _states, Ts... _ts) {
     return Execute::prepare<Variant>(compile_dynamic<Variant>(_tree), _states, std::forward<Ts>(_ts)...);
   }  // d_compile_and_prepare
-#endif
 
-#define COMPILE_AND_QUEUE(priority, tree, state_provider, mode, ...)                                           \
-  [&]() -> auto {                                                                                              \
-    ExecutionItem item;                                                                                        \
-    item.priority_ = priority;                                                                                 \
-    item.mode_     = mode;                                                                                     \
-    item.tree_     = COMPILE_AND_PREPARE("TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]", states, -5); \
-    state_provider.tasks_queue_.dirty_ = true;                                                                 \
-    std::future<TBT::State> out        = item.promise_.get_future();                                           \
-    auto prev                          = state_provider.tasks_queue_.q_.before_begin();                        \
-    auto ref                           = state_provider.tasks_queue_.q_.insert_after(prev, std::move(item));   \
-    return std::make_pair(std::move(out), ref);                                                                \
+#define COMPILE_AND_QUEUE(priority, tree, state_provider, mode, ...)                                         \
+  [&]() -> auto {                                                                                            \
+    ExecutionItem item;                                                                                      \
+    item.priority_                     = priority;                                                           \
+    item.mode_                         = mode;                                                               \
+    item.tree_                         = COMPILE_AND_PREPARE(tree, states, __VA_ARGS__);                     \
+    state_provider.tasks_queue_.dirty_ = true;                                                               \
+    std::future<TBT::State> f          = item.promise_.get_future();                                         \
+    auto prev                          = state_provider.tasks_queue_.q_.before_begin();                      \
+    auto ref                           = state_provider.tasks_queue_.q_.insert_after(prev, std::move(item)); \
+    TreeAwaitable out;                                                                                       \
+    out.future_ = std::move(f);                                                                              \
+    out.ref_    = ref;                                                                                       \
+    return out;                                                                                              \
   }();
 
 #define COMPILE_AND_QUEUE_STEPWISE_1(tree, state_provider, ...) \

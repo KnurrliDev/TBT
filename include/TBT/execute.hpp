@@ -4,6 +4,71 @@
 
 namespace TBT::Execute {
 
+  // template <class Awaitable>
+  // concept has_done_sig = requires(Awaitable a) {
+  //   { a.done() } -> std::same_as<bool>;
+  // };
+
+  enum CoStateState { YIELD, RETURN, AWAIT };
+
+  template <class Awaitable>
+  struct CoStateAwaitable {
+    Awaitable other_;
+    std::function<bool()> is_done_;
+    bool await_ready() noexcept { return false; }
+    void await_suspend(const std::coroutine_handle<State>&) {}
+    void await_resume() noexcept { is_done_(); }
+    explicit CoStateAwaitable(Awaitable&& _other) : other_(std::forward<Awaitable>(_other)) {}
+  };
+
+  struct CoState {
+    struct promise_type {
+      State val_;
+      CoStateState state;
+      std::exception_ptr exception_;
+      bool a_done_ = false;
+
+      CoState get_return_object() noexcept { return CoState{handle::from_promise(*this)}; }
+
+      std::suspend_never initial_suspend() noexcept { return {}; }
+      std::suspend_never final_suspend() noexcept { return {}; }
+
+      std::suspend_always yield_value(const State _val) {
+        state = CoStateState::YIELD;
+        val_  = _val;
+        return {};
+      }
+
+      void return_value(const State _val) noexcept {
+        state = CoStateState::RETURN;
+        val_  = _val;
+      }
+
+      void unhandled_exception() noexcept { exception_ = std::current_exception(); }
+
+      template <class Awaitable>
+      CoStateAwaitable<Awaitable> await_transform(Awaitable&& _a) {
+        state = CoStateState::AWAIT;
+        CoStateAwaitable<Awaitable> out(std::move(_a));
+        out.is_done_ = [&a_done_]() { a_done_ = true; };
+        return out;
+      };
+
+      State get_value() { return val_; }
+      CoStateState get_costate() { return state; }
+      bool is_awaitable_done() { return a_done_; }
+
+      using handle = std::coroutine_handle<promise_type>;
+    };  // promise_type
+    using Handle_t = typename promise_type::handle;
+
+    Handle_t handle_;
+
+    CoState() = default;
+    explicit CoState(Handle_t _h) : handle_(_h) {}
+
+  };  // CoState
+
   namespace Concepts {
 
     //-----------------------------------
@@ -19,9 +84,6 @@ namespace TBT::Execute {
       { init(task) } -> std::same_as<State>;
     };
 
-    template <class TaskDerived, class StateProvider>
-    concept has_any_init_sig = has_init_sig_1<TaskDerived, StateProvider> || has_init_sig_2<TaskDerived>;
-
     //-----------------------------------
     // concepts for all valid run signatures
 
@@ -35,11 +97,37 @@ namespace TBT::Execute {
       { run(task) } -> std::same_as<State>;
     };
 
-    template <class TaskDerived, class StateProvider>
-    concept has_any_run_sig = has_run_sig_1<TaskDerived, StateProvider> || has_run_sig_2<TaskDerived>;
+    //-----------------------------------
+    // concepts for all valid coroutines signatures
 
     template <class TaskDerived, class StateProvider>
-    concept has_any_sig = has_any_run_sig<TaskDerived, StateProvider> || has_any_run_sig<TaskDerived, StateProvider>;
+    concept has_corun_sig_1 = requires(TaskDerived task, StateProvider state) {
+      { co_run(task, state) } -> std::same_as<CoState>;
+    };
+
+    template <class TaskDerived>
+    concept has_corun_sig_2 = requires(TaskDerived task) {
+      { co_run(task) } -> std::same_as<CoState>;
+    };
+
+    template <class TaskDerived, class StateProvider>
+    concept is_corun = has_corun_sig_1<TaskDerived, StateProvider> || has_corun_sig_2<TaskDerived>;
+
+    template <class Variant, class StateProvider>
+    consteval auto corun_mask_for() {
+      using V                 = std::decay_t<Variant>;
+
+      constexpr std::size_t N = std::variant_size_v<V>;
+
+      std::array<bool, N> result{};
+
+      auto fill = []<std::size_t... I>(std::index_sequence<I...>) constexpr {
+        return std::array<bool, sizeof...(I)>{is_corun<std::variant_alternative_t<I, V>, StateProvider>...};
+      };
+
+      result = fill(std::make_index_sequence<N>{});
+      return result;
+    }  // corun_mask_for
 
     //-----------------------------------
     // concepts for all valid exit signatures
@@ -53,9 +141,6 @@ namespace TBT::Execute {
     concept has_exit_sig_2 = requires(TaskDerived task) {
       { exit(task) };
     };
-
-    template <class TaskDerived, class StateProvider>
-    concept has_any_exit_sig = has_exit_sig_1<TaskDerived, StateProvider> || has_exit_sig_2<TaskDerived>;
 
   }  // namespace Concepts
 
@@ -192,90 +277,164 @@ namespace TBT::Execute {
       // add offset to dynamic params
       for (const int32_t i : d_ics) idcs[i] += (uint32_t)payloads.size();
 
-      Variant* state = alloc_task<Variant>(_header.type_idx_, idcs, payloads, _params);
+      constexpr auto co_mask = Concepts::corun_mask_for<Variant, std::decay_t<StateProvider>>();
 
-      // run the task
-      {
-        const State res = std::visit(
+      Variant* state         = alloc_task<Variant>(_header.type_idx_, idcs, payloads, _params);
+
+      const bool is_co       = std::visit(
+          [&](auto& _t) {
+            if constexpr (Concepts::is_corun<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
+              return true;
+            else
+              return false;
+          },
+          *state);
+
+      // a coroutine
+      if (is_co) {
+        // start the coroutine
+        CoState cstate;
+        std::visit(
             [&](auto& _t) {
-              if constexpr (Concepts::has_init_sig_1<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
-                return init(_t, _states);
-              else if constexpr (Concepts::has_init_sig_2<std::decay_t<decltype(_t)>>)
-                return init(_t);
-              // else
-              //   static_assert(false, "no signature found");
+              if constexpr (Concepts::has_corun_sig_1<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
+                cstate = co_run(_t, _states);
+              else if constexpr (Concepts::has_corun_sig_2<std::decay_t<decltype(_t)>>)
+                cstate = co_run(_t);
             },
             *state);
 
-        // the task failed. return to parent
-        if (res == FAILED) {
-          // call exit if present
-          std::visit(
-              [&](auto& _t) {
-                if constexpr (Concepts::has_exit_sig_1<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
-                  exit(_t, _states);
-                else if constexpr (Concepts::has_exit_sig_2<std::decay_t<decltype(_t)>>)
-                  exit(_t);
-              },
-              *state);
+        // check the state of the coroutine
+        auto& prms             = cstate.handle_.promise();
+        const CoStateState res = prms.get_costate();
 
-          delete state;
-          _global_header.ptr_                = _header.parent_;
-          _global_header.last_result_.dir_   = UP;
-          _global_header.last_result_.state_ = res;
-          return BUSY;
+        switch (res) {
+          case YIELD: {
+            // the tasks wants to wait. write states and return.
+            const State value = prms.get_value();
+            assert(value == BUSY);
+            task.ptr_                          = reinterpret_cast<intptr_t>(state);
+            task.co_                           = reinterpret_cast<intptr_t>(cstate.handle_.address());
+            _global_header.last_result_.dir_   = UP;
+            _global_header.last_result_.state_ = value;
+            write_composite(task, _header, _node);
+            return BUSY;
+          }
+          case RETURN: {  // the coroutine has co_returned
+            delete state;
+            // cres.coro_.destroy();
+            const State value = prms.get_value();
+            // return to parent if no children or last child or failed
+            if (value == FAILED || task.cur_idx_ >= _header.children_count_) {
+              task.cur_idx_                    = 0;
+              _global_header.ptr_              = _header.parent_;
+              _global_header.last_result_.dir_ = UP;
+            } else {
+              const uint32_t optr              = read_child(task.cur_idx_, _node);
+              _global_header.last_result_.dir_ = DOWN;
+              task.cur_idx_++;
+              write_composite(task, _header, _node);
+              _global_header.ptr_ = optr;
+            }
+            _global_header.last_result_.state_ = value;
+            return BUSY;
+          }
+          case AWAIT: {  // task will wait until the awaitable has finished
+            task.ptr_                          = reinterpret_cast<intptr_t>(state);
+            task.co_                           = reinterpret_cast<intptr_t>(cstate.handle_.address());
+            _global_header.last_result_.dir_   = UP;
+            _global_header.last_result_.state_ = BUSY;
+            write_composite(task, _header, _node);
+            return BUSY;
+          }
         }
       }
 
-      // the task succeeded. check if wait exists, else return
-      {
-        const std::optional<State> res = std::visit(
-            [&](auto& _t) {
-              if constexpr (Concepts::has_run_sig_1<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
-                return run(_t, _states);
-              else if constexpr (Concepts::has_run_sig_2<std::decay_t<decltype(_t)>>)
-                return run(_t);
-            },
-            *state);
-
-        // no wait signature found and run succeed: task is done
-        // if the task is not busy return to parent or next child
-        if (!res || (res && (*res == FAILED || *res == SUCCESS))) {
-          // call exit if present
+      // not a coroutine
+      else {
+        // init the task
+        {
+          State res;
           std::visit(
               [&](auto& _t) {
-                if constexpr (Concepts::has_exit_sig_1<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
-                  exit(_t, _states);
-                else if constexpr (Concepts::has_exit_sig_2<std::decay_t<decltype(_t)>>)
-                  exit(_t);
+                if constexpr (Concepts::has_init_sig_1<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
+                  res = init(_t, _states);
+                else if constexpr (Concepts::has_init_sig_2<std::decay_t<decltype(_t)>>)
+                  res = init(_t);
               },
               *state);
 
-          delete state;
+          // the task failed. return to parent
+          if (res == FAILED) {
+            // call exit if present
+            std::visit(
+                [&](auto& _t) {
+                  if constexpr (Concepts::has_exit_sig_1<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
+                    exit(_t, _states);
+                  else if constexpr (Concepts::has_exit_sig_2<std::decay_t<decltype(_t)>>)
+                    exit(_t);
+                },
+                *state);
 
-          // return to parent if no children or last child
-          if (task.cur_idx_ >= _header.children_count_) {
-            task.cur_idx_                    = 0;
-            _global_header.ptr_              = _header.parent_;
-            _global_header.last_result_.dir_ = UP;
-          } else {
-            const uint32_t optr              = read_child(task.cur_idx_, _node);
-            _global_header.last_result_.dir_ = DOWN;
-            task.cur_idx_++;
-            write_composite(task, _header, _node);
-            _global_header.ptr_ = optr;
+            delete state;
+            _global_header.ptr_                = _header.parent_;
+            _global_header.last_result_.dir_   = UP;
+            _global_header.last_result_.state_ = res;
+            return BUSY;
           }
+        }
 
-          // either wait has returned a state or the state must be success from run
-          _global_header.last_result_.state_ = res ? *res : SUCCESS;
+        // the task succeeded. check if wait exists, else return
+        {
+          std::optional<State> res = std::visit(
+              [&](auto& _t) -> std::optional<State> {
+                if constexpr (Concepts::has_run_sig_1<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
+                  return run(_t, _states);
+                else if constexpr (Concepts::has_run_sig_2<std::decay_t<decltype(_t)>>)
+                  return run(_t);
+                else
+                  return std::nullopt;
+              },
+              *state);
+
+          // no wait signature found and run succeed: task is done
+          // if the task is not busy return to parent or next child
+          if (!res || (res && (*res == FAILED || *res == SUCCESS))) {
+            // call exit if present
+            std::visit(
+                [&](auto& _t) {
+                  if constexpr (Concepts::has_exit_sig_1<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
+                    exit(_t, _states);
+                  else if constexpr (Concepts::has_exit_sig_2<std::decay_t<decltype(_t)>>)
+                    exit(_t);
+                },
+                *state);
+
+            delete state;
+
+            // return to parent if no children or last child
+            if (*res == FAILED || task.cur_idx_ >= _header.children_count_) {
+              task.cur_idx_                    = 0;
+              _global_header.ptr_              = _header.parent_;
+              _global_header.last_result_.dir_ = UP;
+            } else {
+              const uint32_t optr              = read_child(task.cur_idx_, _node);
+              _global_header.last_result_.dir_ = DOWN;
+              task.cur_idx_++;
+              write_composite(task, _header, _node);
+              _global_header.ptr_ = optr;
+            }
+
+            // either wait has returned a state or the state must be success from run
+            _global_header.last_result_.state_ = res ? *res : SUCCESS;
+            return BUSY;
+          }
+          // the tasks wants to wait. write states and return.
+          task.ptr_                          = reinterpret_cast<intptr_t>(state);
+          _global_header.last_result_.dir_   = UP;
+          _global_header.last_result_.state_ = *res;
+          write_composite(task, _header, _node);
           return BUSY;
         }
-        // the tasks wants to wait. write states and return.
-        task.ptr_                          = reinterpret_cast<intptr_t>(state);
-        _global_header.last_result_.dir_   = UP;
-        _global_header.last_result_.state_ = *res;
-        write_composite(task, _header, _node);
-        return BUSY;
       }
     }
 
@@ -301,44 +460,131 @@ namespace TBT::Execute {
 
       // keep running the task
       assert(task.ptr_ != 0);
-      Variant* state = reinterpret_cast<Variant*>(task.ptr_);
+      Variant* state   = reinterpret_cast<Variant*>(task.ptr_);
 
-      State res      = FAILED;
-      std::visit(
+      const bool is_co = std::visit(
           [&](auto& _t) {
-            if constexpr (Concepts::has_run_sig_1<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
-              res = run(_t, _states);
-            else if constexpr (Concepts::has_run_sig_2<std::decay_t<decltype(_t)>>)
-              res = run(_t);
+            if constexpr (Concepts::is_corun<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
+              return true;
+            else
+              return false;
           },
           *state);
 
-      // task is finished
-      if (res == FAILED || res == SUCCESS) {
-        // call exit if present
+      // a coroutine
+      if (is_co) {
+        assert(task.co_ != 0);
+
+        auto co_handle = std::coroutine_handle<CoState::promise_type>::from_address(reinterpret_cast<void*>(task.co_));
+        auto& prms     = co_handle.promise();
+
+        // check last costate
+        const CoStateState res_prev = prms.get_costate();
+        assert(res_prev != RETURN);
+
+        switch (res_prev) {
+          case YIELD:  // coninue execution
+          {
+            co_handle.resume();
+          }
+          case AWAIT:  // continue if the awaitable has finished
+          {
+            const bool a_done = prms.is_awaitable_done();
+            if (a_done) co_handle.resume();
+          }
+        }
+
+        // check the coroutine after resuming
+        const CoStateState res_after = prms.get_costate();
+
+        switch (res_after) {
+          case YIELD: {
+            // the tasks wants to wait. write states and return.
+            const State value = prms.get_value();
+            assert(value == BUSY);
+            _global_header.last_result_.dir_   = UP;
+            _global_header.last_result_.state_ = value;
+            return BUSY;
+          }
+          case RETURN: {  // the coroutine has co_returned
+            delete state;
+            // cres.coro_.destroy();
+            const State value = prms.get_value();
+            // return to parent if no children or last child or failed
+            if (value == FAILED || task.cur_idx_ >= _header.children_count_) {
+              task.cur_idx_                    = 0;
+              _global_header.ptr_              = _header.parent_;
+              _global_header.last_result_.dir_ = UP;
+            } else {
+              const uint32_t optr              = read_child(task.cur_idx_, _node);
+              _global_header.last_result_.dir_ = DOWN;
+              task.cur_idx_++;
+              write_composite(task, _header, _node);
+              _global_header.ptr_ = optr;
+            }
+            _global_header.last_result_.state_ = value;
+            return BUSY;
+          }
+          case AWAIT: {  // task will wait until the awaitable has finished
+            _global_header.last_result_.dir_   = UP;
+            _global_header.last_result_.state_ = BUSY;
+            return BUSY;
+          }
+        }
+      }
+
+      // not a coroutin
+      else {
+        State res;
         std::visit(
             [&](auto& _t) {
-              if constexpr (Concepts::has_exit_sig_1<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
-                exit(_t, _states);
-              else if constexpr (Concepts::has_exit_sig_2<std::decay_t<decltype(_t)>>)
-                exit(_t);
+              if constexpr (Concepts::has_run_sig_1<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
+                res = run(_t, _states);
+              else if constexpr (Concepts::has_run_sig_2<std::decay_t<decltype(_t)>>)
+                res = run(_t);
             },
             *state);
 
-        delete state;
+        // task is finished
+        if (res == FAILED || res == SUCCESS) {
+          // call exit if present
+          std::visit(
+              [&](auto& _t) {
+                if constexpr (Concepts::has_exit_sig_1<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
+                  exit(_t, _states);
+                else if constexpr (Concepts::has_exit_sig_2<std::decay_t<decltype(_t)>>)
+                  exit(_t);
+              },
+              *state);
 
-        // return to parent if no children or last child
-        _global_header.ptr_                = _header.parent_;
+          delete state;
+
+          // return to parent if no children or last child
+          if (res == FAILED || task.cur_idx_ >= _header.children_count_) {
+            task.cur_idx_                    = 0;
+            _global_header.ptr_              = _header.parent_;
+            _global_header.last_result_.dir_ = UP;
+          } else {
+            const uint32_t optr              = read_child(task.cur_idx_, _node);
+            _global_header.last_result_.dir_ = DOWN;
+            task.cur_idx_++;
+            write_composite(task, _header, _node);
+            _global_header.ptr_ = optr;
+          }
+
+          // either wait has returned a state or the state must be success from run
+          _global_header.last_result_.state_ = res;
+          return BUSY;
+        }
+
+        // wait longer
         _global_header.last_result_.dir_   = UP;
         _global_header.last_result_.state_ = res;
         return BUSY;
       }
-
-      // wait longer
-      _global_header.last_result_.dir_   = UP;
-      _global_header.last_result_.state_ = res;
-      return BUSY;
     }
+    // todo: a path is missing
+    return BUSY;
   }  // execute_task
 
   template <class Variant, class Tree, class StateProvider, class... Ts>

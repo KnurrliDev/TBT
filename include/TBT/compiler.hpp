@@ -145,6 +145,7 @@ namespace TBT::Compiler {
   };  // deserialize
 
   struct Composite {
+    uintptr_t co_    = 0;
     uintptr_t ptr_   = 0;
     int16_t cur_idx_ = 0;
   };  // Composite
@@ -628,6 +629,7 @@ namespace TBT::Compiler {
       Composite cmp;
       cmp.cur_idx_ = 0;
       cmp.ptr_     = 0;
+      cmp.co_      = 0;
 
       write_composite(cmp, nheader, {_vals.data() + ptr, nheader.node_size_});
 

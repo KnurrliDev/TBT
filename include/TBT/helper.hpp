@@ -62,7 +62,7 @@ namespace TBT {
     auto prev = state_provider.tasks_queue_.q_.before_begin();                             \
     auto curr = state_provider.tasks_queue_.q_.begin();                                    \
     while (curr != state_provider.tasks_queue_.q_.end()) {                                 \
-      ExecutionItem& item = *curr;                                                         \
+      TBT::ExecutionItem& item = *curr;                                                    \
       switch (item.mode_) {                                                                \
         case TBT::STEPWISE_1: {                                                            \
           TBT::State r = item.tree_();                                                     \
@@ -96,10 +96,11 @@ namespace TBT {
 #ifdef __INTELLISENSE__
 #define COMPILE_AND_PREPARE(...) []() -> std::function<State()> { return []() { return SUCCESS; }; }();
 #else
-#define COMPILE_AND_PREPARE(tree, states, ...)                                                    \
-  Execute::prepare<typename std::decay_t<decltype(states)>::Variant>(                             \
-      compile_static<compute_size_static<typename std::decay_t<decltype(states)>::Variant>(tree), \
-                     typename std::decay_t<decltype(states)>::Variant>(tree),                     \
+#define COMPILE_AND_PREPARE(tree, states, ...)                                                        \
+  TBT::Execute::prepare<typename std::decay_t<decltype(states)>::Variant>(                            \
+      TBT::Compiler::compile_static<                                                                  \
+          TBT::Compiler::compute_size_static<typename std::decay_t<decltype(states)>::Variant>(tree), \
+          typename std::decay_t<decltype(states)>::Variant>(tree),                                    \
       states __VA_OPT__(, ) __VA_ARGS__);
 #endif
 
@@ -110,7 +111,7 @@ namespace TBT {
 
 #define COMPILE_AND_QUEUE(priority, tree, state_provider, mode, ...)                                         \
   [&]() -> auto {                                                                                            \
-    ExecutionItem item;                                                                                      \
+    TBT::ExecutionItem item;                                                                                 \
     item.priority_                     = priority;                                                           \
     item.mode_                         = mode;                                                               \
     item.tree_                         = COMPILE_AND_PREPARE(tree, state_provider, __VA_ARGS__);             \
@@ -118,7 +119,7 @@ namespace TBT {
     std::future<TBT::State> f          = item.promise_.get_future();                                         \
     auto prev                          = state_provider.tasks_queue_.q_.before_begin();                      \
     auto ref                           = state_provider.tasks_queue_.q_.insert_after(prev, std::move(item)); \
-    TreeAwaitable<ExecutionItem> out;                                                                        \
+    TBT::TreeAwaitable<TBT::ExecutionItem> out;                                                              \
     out.future_ = std::move(f);                                                                              \
     out.ref_    = ref;                                                                                       \
     return out;                                                                                              \

@@ -64,7 +64,7 @@ namespace TBT {
     while (curr != state_provider.tasks_queue_.q_.end()) {                                 \
       ExecutionItem& item = *curr;                                                         \
       switch (item.mode_) {                                                                \
-        case STEPWISE_1: {                                                                 \
+        case TBT::STEPWISE_1: {                                                            \
           TBT::State r = item.tree_();                                                     \
           if (r != TBT::BUSY) {                                                            \
             item.promise_.set_value(r);                                                    \
@@ -73,7 +73,7 @@ namespace TBT {
           }                                                                                \
           break;                                                                           \
         }                                                                                  \
-        case STEPWISE_INF: {                                                               \
+        case TBT::STEPWISE_INF: {                                                          \
           item.tree_();                                                                    \
           break;                                                                           \
         }                                                                                  \
@@ -84,7 +84,7 @@ namespace TBT {
           curr = state_provider.tasks_queue_.q_.erase_after(prev);                         \
           break;                                                                           \
         }                                                                                  \
-        case FULL_INF: {                                                                   \
+        case TBT::FULL_INF: {                                                              \
           while ((item.tree_()) != TBT::BUSY) {}                                           \
           break;                                                                           \
         }                                                                                  \
@@ -125,12 +125,12 @@ namespace TBT {
   }();
 
 #define COMPILE_AND_QUEUE_STEPWISE_1(priority, tree, state_provider, ...) \
-  COMPILE_AND_QUEUE(priority, tree, state_provider, STEPWISE_1, __VA_ARGS__)
+  COMPILE_AND_QUEUE(priority, tree, state_provider, TBT::STEPWISE_1, __VA_ARGS__)
 #define COMPILE_AND_QUEUE_STEPWISE_INF(priority, tree, state_provider, ...) \
-  COMPILE_AND_QUEUE(priority, tree, state_provider, STEPWISE_INF, __VA_ARGS__)
+  COMPILE_AND_QUEUE(priority, tree, state_provider, TBT::STEPWISE_INF, __VA_ARGS__)
 #define COMPILE_AND_QUEUE_FULL_1(priority, tree, state_provider, ...) \
-  COMPILE_AND_QUEUE(priority, tree, state_provider, FULL_1, __VA_ARGS__)
+  COMPILE_AND_QUEUE(priority, tree, state_provider, TBT::FULL_1, __VA_ARGS__)
 #define COMPILE_AND_QUEUE_FULL_INF(priority, tree, state_provider, ...) \
-  COMPILE_AND_QUEUE(priority, tree, state_provider, FULL_INF, __VA_ARGS__)
+  COMPILE_AND_QUEUE(priority, tree, state_provider, TBT::FULL_INF, __VA_ARGS__)
 
 }  // namespace TBT

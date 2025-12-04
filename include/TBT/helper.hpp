@@ -77,7 +77,7 @@ namespace TBT {
           item.tree_();                                                                    \
           break;                                                                           \
         }                                                                                  \
-        case FULL_1: {                                                                     \
+        case TBT::FULL_1: {                                                                \
           TBT::State r = TBT::State::SUCCESS;                                              \
           while ((r = item.tree_()) != TBT::BUSY) {}                                       \
           item.promise_.set_value(r);                                                      \

@@ -28,31 +28,14 @@ namespace TBT {
   template <class T, class Allocator = std::allocator<T>>
   struct TreeAwaitable {
     std::future<TBT::State> future_;
-    std::coroutine_handle<State> handle_;
     TreeRef<Allocator> ref_;
 
     bool await_ready() noexcept { return false; }
-    void await_suspend(const std::coroutine_handle<State>&) {}
+
+    void await_suspend(const std::coroutine_handle<Execute::CoState::promise_type>&) {}
     State await_resume() noexcept { return future_.get(); }
 
   };  // TreeAwaitable
-
-  // template <class T>
-  // struct Awaitable {
-  //   T val_;
-  //   bool done_ = false;
-  //   std::function<void()> func_;
-
-  //   explicit Awaitable(std::function<void()> _func)::func_(std:: : move(_func)) {}
-
-  //   bool await_ready() noexcept { return false; }
-  //   void await_suspend(const std::coroutine_handle<State>&) {
-  //     func_();
-  //     done_ = true;
-  //   }
-  //   T await_resume() noexcept { return val_; }
-
-  // };  // Awaitable
 
   /*
     The TaskQueue needs fullfill multiple requirements:
@@ -69,43 +52,47 @@ namespace TBT {
     bool dirty_ = true;
   };  // TaskQueue
 
-#define EXECUTE_QUEUE(state_provider)                                                                              \
-  if (!states.tasks_queue_.q_.empty()) {                                                                           \
-    if (state_provider.tasks_queue_.dirty_) {                                                                      \
-      state_provider.tasks_queue_.dirty_ = false;                                                                  \
-      states.tasks_queue_.q_.sort([](const auto& _v1, const auto& _v2) { return _v1.priority_ > _v2.priority_; }); \
-    }                                                                                                              \
-    auto prev = states.tasks_queue_.q_.before_begin();                                                             \
-    auto curr = states.tasks_queue_.q_.begin();                                                                    \
-    while (curr != states.tasks_queue_.q_.end()) {                                                                 \
-      ExecutionItem& item = *curr;                                                                                 \
-      switch (item.mode_) {                                                                                        \
-        case STEPWISE_1: {                                                                                         \
-          TBT::State r = item.tree_();                                                                             \
-          if (r != TBT::BUSY) {                                                                                    \
-            item.promise_.set_value(r);                                                                            \
-            curr = states.tasks_queue_.q_.erase_after(prev);                                                       \
-          }                                                                                                        \
-          break;                                                                                                   \
-        }                                                                                                          \
-        case STEPWISE_INF: {                                                                                       \
-          item.tree_();                                                                                            \
-          break;                                                                                                   \
-        }                                                                                                          \
-        case FULL_1: {                                                                                             \
-          TBT::State r = TBT::State::SUCCESS;                                                                      \
-          while ((r = item.tree_()) != TBT::BUSY) {}                                                               \
-          item.promise_.set_value(r);                                                                              \
-          curr = states.tasks_queue_.q_.erase_after(prev);                                                         \
-          break;                                                                                                   \
-        }                                                                                                          \
-        case FULL_INF: {                                                                                           \
-          while ((item.tree_()) != TBT::BUSY) {}                                                                   \
-          break;                                                                                                   \
-        }                                                                                                          \
-      }                                                                                                            \
-    }                                                                                                              \
+#define EXECUTE_QUEUE(state_provider)                                                      \
+  if (!state_provider.tasks_queue_.q_.empty()) {                                           \
+    if (state_provider.tasks_queue_.dirty_) {                                              \
+      state_provider.tasks_queue_.dirty_ = false;                                          \
+      state_provider.tasks_queue_.q_.sort(                                                 \
+          [](const auto& _v1, const auto& _v2) { return _v1.priority_ > _v2.priority_; }); \
+    }                                                                                      \
+    auto prev = state_provider.tasks_queue_.q_.before_begin();                             \
+    auto curr = state_provider.tasks_queue_.q_.begin();                                    \
+    while (curr != state_provider.tasks_queue_.q_.end()) {                                 \
+      ExecutionItem& item = *curr;                                                         \
+      switch (item.mode_) {                                                                \
+        case STEPWISE_1: {                                                                 \
+          TBT::State r = item.tree_();                                                     \
+          if (r != TBT::BUSY) {                                                            \
+            item.promise_.set_value(r);                                                    \
+            if (item.values_) item.values_->a_done_ = true;                                \
+            curr = state_provider.tasks_queue_.q_.erase_after(prev);                       \
+          }                                                                                \
+          break;                                                                           \
+        }                                                                                  \
+        case STEPWISE_INF: {                                                               \
+          item.tree_();                                                                    \
+          break;                                                                           \
+        }                                                                                  \
+        case FULL_1: {                                                                     \
+          TBT::State r = TBT::State::SUCCESS;                                              \
+          while ((r = item.tree_()) != TBT::BUSY) {}                                       \
+          item.promise_.set_value(r);                                                      \
+          curr = state_provider.tasks_queue_.q_.erase_after(prev);                         \
+          break;                                                                           \
+        }                                                                                  \
+        case FULL_INF: {                                                                   \
+          while ((item.tree_()) != TBT::BUSY) {}                                           \
+          break;                                                                           \
+        }                                                                                  \
+      }                                                                                    \
+      if (curr != state_provider.tasks_queue_.q_.end()) curr++;                            \
+    }                                                                                      \
   }
+
 #ifdef __INTELLISENSE__
 #define COMPILE_AND_PREPARE(...) []() -> std::function<State()> { return []() { return SUCCESS; }; }();
 #else

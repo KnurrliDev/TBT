@@ -627,6 +627,168 @@ struct TaskC {
 #define TASK_TYPE TaskC
 #include <TBT/magic.hpp>
 
+struct TaskD {
+  int32_t val_ = 40;
+};
+#define TASK_TYPE TaskD
+#include <TBT/magic.hpp>
+
+struct TaskE {
+  int32_t val_ = 50;
+};
+#define TASK_TYPE TaskE
+#include <TBT/magic.hpp>
+
+struct MoveTask {
+  bool enable{};
+  int32_t steps{};
+  float speed{};
+  int32_t id{};
+};
+template <>
+struct glz::meta<MoveTask> {
+  using T                     = MoveTask;
+  static constexpr auto value = glz::object(&T::enable, "enable", &T::steps, "steps", &T::speed, "speed", &T::id, "id");
+};
+
+struct JumpTask {
+  float height{};
+  bool repeat{};
+};
+template <>
+struct glz::meta<JumpTask> {
+  using T                     = JumpTask;
+  static constexpr auto value = glz::object(&T::height, "height", &T::repeat, "repeat");
+};
+
+TEST_CASE("tuple_element_to_variant extracts the correct element", "[utility]") {
+  auto tup = std::make_tuple(42, 3.14f, true, -42);
+
+  auto v0  = Execute::tuple_element_to_variant(tup, 0);
+  auto v1  = Execute::tuple_element_to_variant(tup, 1);
+  auto v2  = Execute::tuple_element_to_variant(tup, 2);
+  auto v3  = Execute::tuple_element_to_variant(tup, 3);
+
+  REQUIRE(std::holds_alternative<int32_t>(v0));
+  REQUIRE(std::get<int32_t>(v0) == 42);
+
+  REQUIRE(std::holds_alternative<float>(v1));
+  REQUIRE(std::get<float>(v1) == 3.14f);
+
+  REQUIRE(std::holds_alternative<bool>(v2));
+  REQUIRE(std::get<bool>(v2) == true);
+
+  REQUIRE(std::holds_alternative<int32_t>(v3));
+  REQUIRE(std::get<int32_t>(v3) == -42);
+}
+
+TEST_CASE("construct_task - only static payload", "[construct_task]") {
+  std::vector<uint32_t> idxs{0, 1, 2, 3};  // map fields 0-3 to payload indices
+  std::vector<Parameter> pl{true, int32_t{-500}, 2.5f, int32_t{99}};
+  // only bool, float and signed ints are allowed as static payload
+  auto task = Execute::construct_task<MoveTask>(idxs, pl, std::tuple<>{});
+
+  REQUIRE(task.enable == true);
+  REQUIRE(task.steps == -500);
+  REQUIRE(task.speed == 2.5f);
+  REQUIRE(task.id == 99u);
+}
+
+TEST_CASE("construct_task - only dynamic parameters (tuple)", "[construct_task]") {
+  std::vector<uint32_t> idxs{0, 1, 2, 3};                        // indices >= pl.size() → taken from tuple
+  std::vector<std::variant<bool, int32_t, float, uint32_t>> pl;  // empty
+
+  auto params = std::make_tuple(false, int32_t{1000}, 10.0f, int32_t{7});
+
+  auto task   = Execute::construct_task<MoveTask>(idxs, pl, params);
+
+  REQUIRE(task.enable == false);
+  REQUIRE(task.steps == 1000);
+  REQUIRE(task.speed == 10.0f);
+  REQUIRE(task.id == 7u);
+}
+
+TEST_CASE("construct_task - mixed static + dynamic payload", "[construct_task]") {
+  // field order: enable, steps, speed, id
+  // idxs:  0 → static payload[0] = true
+  //        3 → dynamic tuple[0]   = -200   (3 - 1 = 2, but we will use tuple index 0)
+  //        1 → static payload[1] = 5.5f
+  //        2 → static payload[2] = 42u
+  std::vector<uint32_t> idxs{0, 3, 1, 2};
+  std::vector<Parameter> pl{true, 5.5f, int32_t{42}};
+
+  auto params = std::make_tuple(int32_t{-200});  // only one dynamic value
+
+  auto task   = Execute::construct_task<MoveTask>(idxs, pl, params);
+
+  REQUIRE(task.enable == true);  // static[0]
+  REQUIRE(task.steps == -200);   // dynamic tuple[0]
+  REQUIRE(task.speed == 5.5f);   // static[1]
+  REQUIRE(task.id == 42u);       // static[2]
+}
+
+TEST_CASE("construct_task - fewer indices than members → remaining default constructed", "[construct_task]") {
+  std::vector<uint32_t> idxs{0};  // only first field supplied
+  std::vector<Parameter> pl{true};
+
+  auto task = Execute::construct_task<MoveTask>(idxs, pl, std::tuple<>{});
+
+  REQUIRE(task.enable == true);
+  REQUIRE(task.steps == 0);
+  REQUIRE(task.speed == 0.0f);
+  REQUIRE(task.id == 0u);
+}
+
+TEST_CASE("alloc_task - empty index list (default construction)", "[alloc_task]") {
+  using TaskVariant = std::variant<MoveTask, JumpTask>;
+
+  auto* ptr         = Execute::alloc_task<TaskVariant>(0, {}, {}, std::tuple<>{});
+  REQUIRE(ptr != nullptr);
+  REQUIRE(std::holds_alternative<MoveTask>(*ptr));
+
+  auto* ptr2 = Execute::alloc_task<TaskVariant>(1, {}, {}, std::tuple<>{});
+  REQUIRE(std::holds_alternative<JumpTask>(*ptr2));
+
+  delete ptr;
+  delete ptr2;
+}
+
+TEST_CASE("alloc_task - full construction via construct_task", "[alloc_task]") {
+  using TaskVariant = std::variant<MoveTask, JumpTask>;
+
+  std::vector<uint32_t> idxs{0, 1, 2, 3};
+  std::vector<Parameter> pl{false, int32_t{777}, 3.0f, int32_t{123}};
+
+  // allocate variant index 0 → MoveTask
+  auto* ptr = Execute::alloc_task<TaskVariant>(0, idxs, pl, std::tuple<>{});
+  REQUIRE(std::holds_alternative<MoveTask>(*ptr));
+
+  const auto& move = std::get<MoveTask>(*ptr);
+  REQUIRE(move.enable == false);
+  REQUIRE(move.steps == 777);
+  REQUIRE(move.speed == 3.0f);
+  REQUIRE(move.id == 123);
+
+  delete ptr;
+}
+
+TEST_CASE("alloc_task - JumpTask with mixed payload", "[alloc_task]") {
+  using TaskVariant = std::variant<MoveTask, JumpTask>;
+
+  // JumpTask has two members: height (float), repeat (bool)
+  std::vector<uint32_t> idxs{1, 0};  // height ← payload[1] (float), repeat ← payload[0] (bool)
+  std::vector<Parameter> pl{true, 12.5f};
+
+  auto* ptr = Execute::alloc_task<TaskVariant>(1, idxs, pl, std::tuple<>{});  // index 1 = JumpTask
+  REQUIRE(std::holds_alternative<JumpTask>(*ptr));
+
+  const auto& jump = std::get<JumpTask>(*ptr);
+  REQUIRE(jump.height == 12.5f);
+  REQUIRE(jump.repeat == true);
+
+  delete ptr;
+}
+
 // in an actual project we would use this.
 // using Variant = std::variant<TASK_TYPES>;
 using Variant = std::variant<TaskA, TaskB, TaskC>;
@@ -812,6 +974,39 @@ void exit(const TaskC& _t, States& _s) {
   _s.t_.push_back(std::format("exit [{}]", _t.val_));
 }
 
+//---------------------------------------
+
+template <class States>
+Execute::CoState co_run(TaskD& _t, States& _s) {
+  _s.t_.push_back(std::format("co_await start [{}]", _t.val_));
+  co_await COMPILE_AND_QUEUE(0, "TaskE", _s, STEPWISE_1);
+  _s.t_.push_back(std::format("co_await end [{}]", _t.val_));
+  co_return SUCCESS;
+}
+template <class States>
+void exit(const TaskD& _t, States& _s) {
+  _s.t_.push_back(std::format("exit [{}]", _t.val_));
+}
+
+//---------------------------------------
+
+template <class States>
+Execute::CoState co_run(TaskE& _t, States& _s) {
+  _s.t_.push_back(std::format("co_yield [{}]", _t.val_));
+  co_yield 0;
+  _s.t_.push_back(std::format("co_yield [{}]", _t.val_));
+  co_yield 0;
+  _s.t_.push_back(std::format("co_yield [{}]", _t.val_));
+  co_return SUCCESS;
+}
+
+template <class States>
+void exit(const TaskE& _t, States& _s) {
+  _s.t_.push_back(std::format("exit [{}]", _t.val_));
+}
+
+//---------------------------------------
+
 TEST_CASE("hierarchy", "[Execute]") {
   using Variant                = std::variant<TaskA, TaskB, TaskC>;
 
@@ -868,120 +1063,74 @@ struct StateProvider {
   TBT::TaskQueue<> tasks_queue_;
 };
 
-// TEST_CASE("prepare", "[Execute]") {
-//   using Variant                = std::variant<TaskA, TaskB, TaskC>;
+TEST_CASE("legacy", "[Execute]") {
+  using Variant1 = std::variant<TaskA, TaskB, TaskC, TaskD, TaskE>;
 
-//   // constexpr auto vr            = variant_type_index_name_pairs<Variant>();
+  StateProvider<Variant1> sp;
 
-//   constexpr std::string_view s = "TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]";
+  auto p = COMPILE_AND_QUEUE(0, "TaskA($0)[TaskB($1), TaskC($2)] TaskA($3)", sp, STEPWISE_1, 10, 20, 30, 40);
 
-//   StateProvider<Variant> states;
+  for (int32_t i = 0; i < 1000; ++i) { EXECUTE_QUEUE(sp) }
 
-//   const auto prep  = Execute::prepare<Variant>(compile_static<compute_size_static<Variant>(s), Variant>(s), states,
-//   -5);
+  REQUIRE(sp.t_[0] == "init [10]");
+  REQUIRE(sp.t_[1] == "run [10]");
+  REQUIRE(sp.t_[2] == "exit [10]");
 
-//   const auto prep0 = Execute::prepare<typename decltype(states)::Variant>(
-//       compile_static<compute_size_static<typename decltype(states)::Variant>(s), typename
-//       decltype(states)::Variant>(s), states, -5);
+  REQUIRE(sp.t_[3] == "init [20]");
+  REQUIRE(sp.t_[4] == "run [20]");
+  REQUIRE(sp.t_[5] == "exit [20]");
 
-//   const auto prep1 = COMPILE_AND_PREPARE(s, states, -5);
-//   const auto prep2 = COMPILE_AND_PREPARE("TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]", states, -5);
+  REQUIRE(sp.t_[6] == "init [30]");
+  REQUIRE(sp.t_[7] == "run [30]");
+  REQUIRE(sp.t_[8] == "run [30]");
+  REQUIRE(sp.t_[9] == "run [30]");
+  REQUIRE(sp.t_[10] == "exit [30]");
 
-//   const auto awaitable =
-//       COMPILE_AND_QUEUE(0, "TaskC, TaskA($0)[TaskB(5)[TaskA, TaskB]] TaskA[TaskC]", states, FULL_1, -5);
-
-//   // TODO states.tasks_queue_.erase_after(std::prev(tree_ptr));
-
-//   // while (true) {
-//   EXECUTE_QUEUE(states);
-//   //
-//   //}
-// }
-
-//-----------------------------------------------------
-
-struct TaskD {
-  int32_t val_ = 5;
-};
-#define TASK_TYPE TaskD
-#include <TBT/magic.hpp>
-
-template <class States>
-Execute::CoState co_run(const TaskD& _t, States& _s) {
-  std::cout << "Wait start" << std::endl;
-  co_await COMPILE_AND_QUEUE(0, "TaskE", _s, STEPWISE_1);
-  std::cout << "Wait end" << std::endl;
-  co_return SUCCESS;
-}
-
-struct TaskE {
-  int32_t val_ = 5;
-};
-#define TASK_TYPE TaskE
-#include <TBT/magic.hpp>
-
-template <class States>
-Execute::CoState co_run(const TaskE& _t, States& _s) {
-  std::cout << "0" << std::endl;
-  co_yield 0;
-  std::cout << "1" << std::endl;
-  co_yield 0;
-  std::cout << "2" << std::endl;
-  co_return SUCCESS;
-}
-
-template <class States>
-void exit(const TaskD& _t, States& _s) {
-  _s.t_.push_back(std::format("exit [{}]", _t.val_));
+  REQUIRE(sp.t_[11] == "init [40]");
+  REQUIRE(sp.t_[12] == "run [40]");
+  REQUIRE(sp.t_[13] == "exit [40]");
 }
 
 TEST_CASE("co-routines", "[Execute]") {
   using Variant1 = std::variant<TaskA, TaskB, TaskC, TaskD, TaskE>;
 
-  StateProvider<Variant1> state_provider;
+  StateProvider<Variant1> sp;
 
-  auto p = COMPILE_AND_QUEUE(0, "TaskD", state_provider, STEPWISE_1);
+  auto p = COMPILE_AND_QUEUE(0, "TaskD($0)[TaskE($1)]", sp, STEPWISE_1, 10, 20);
 
-  for (int32_t i = 0; i < 1000; ++i) {
-    if (!state_provider.tasks_queue_.q_.empty()) {
-      if (state_provider.tasks_queue_.dirty_) {
-        state_provider.tasks_queue_.dirty_ = false;
-        state_provider.tasks_queue_.q_.sort(
-            [](const auto& _v1, const auto& _v2) { return _v1.priority_ > _v2.priority_; });
-      }
-      auto prev = state_provider.tasks_queue_.q_.before_begin();
-      auto curr = state_provider.tasks_queue_.q_.begin();
-      while (curr != state_provider.tasks_queue_.q_.end()) {
-        ExecutionItem& item = *curr;
-        switch (item.mode_) {
-          case STEPWISE_1: {
-            TBT::State r = item.tree_();
-            if (r != TBT::BUSY) {
-              item.promise_.set_value(r);
-              if (item.values_)  //
-                item.values_->a_done_ = true;
-              curr = state_provider.tasks_queue_.q_.erase_after(prev);
-            }
-            break;
-          }
-          case STEPWISE_INF: {
-            item.tree_();
-            break;
-          }
-          case FULL_1: {
-            TBT::State r = TBT::State::SUCCESS;
-            while ((r = item.tree_()) != TBT::BUSY) {}
-            item.promise_.set_value(r);
-            curr = state_provider.tasks_queue_.q_.erase_after(prev);
-            break;
-          }
-          case FULL_INF: {
-            while ((item.tree_()) != TBT::BUSY) {}
-            break;
-          }
-        }
-        if (curr != state_provider.tasks_queue_.q_.end()) curr++;
-      }
-    }
-  }
+  for (int32_t i = 0; i < 1000; ++i) { EXECUTE_QUEUE(sp) }
+
+  REQUIRE(sp.t_[0] == "co_await start [10]");
+
+  REQUIRE(sp.t_[1] == "co_yield [50]");
+  REQUIRE(sp.t_[2] == "co_yield [50]");
+  REQUIRE(sp.t_[3] == "co_yield [50]");
+  REQUIRE(sp.t_[4] == "exit [50]");
+
+  REQUIRE(sp.t_[5] == "co_await end [10]");
+  REQUIRE(sp.t_[6] == "exit [10]");
+
+  REQUIRE(sp.t_[7] == "co_yield [20]");
+  REQUIRE(sp.t_[8] == "co_yield [20]");
+  REQUIRE(sp.t_[9] == "co_yield [20]");
+  REQUIRE(sp.t_[10] == "exit [20]");
+}
+
+TEST_CASE("mixed", "[Execute]") {
+  using Variant1 = std::variant<TaskA, TaskB, TaskC, TaskD, TaskE>;
+
+  StateProvider<Variant1> sp;
+
+  auto p = COMPILE_AND_QUEUE(0, "TaskA($0)[TaskE($1)]", sp, STEPWISE_1, 10, 20);
+
+  for (int32_t i = 0; i < 1000; ++i) { EXECUTE_QUEUE(sp) }
+
+  REQUIRE(sp.t_[0] == "init [10]");
+  REQUIRE(sp.t_[1] == "run [10]");
+  REQUIRE(sp.t_[2] == "exit [10]");
+
+  REQUIRE(sp.t_[3] == "co_yield [20]");
+  REQUIRE(sp.t_[4] == "co_yield [20]");
+  REQUIRE(sp.t_[5] == "co_yield [20]");
+  REQUIRE(sp.t_[6] == "exit [20]");
 }

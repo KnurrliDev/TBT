@@ -5,7 +5,35 @@
 namespace TBT {
   template <class T, class Allocator>
   struct TreeAwaitable;
-}
+
+  namespace Execute {
+    struct CoStateValues;
+  }
+
+  template <class T>
+  struct Awaitable {
+    T val_;
+    std::shared_ptr<Execute::CoStateValues> values_;
+    std::function<T()> func_;
+
+    Awaitable() = default;
+
+    bool await_ready() noexcept { return false; }
+
+    template <class Handle>
+    void await_suspend(const Handle&) {
+      init_awaitable([v = values_]() {
+        assert(v);
+        v->a_done_ = true;
+      });
+    }
+
+    T await_resume() noexcept { return val_; }
+
+    virtual void init_awaitable(std::function<void()> _set_done) = 0;
+
+  };  // Awaitable
+}  // namespace TBT
 
 namespace TBT::Execute {
 
@@ -47,13 +75,13 @@ namespace TBT::Execute {
 
       void unhandled_exception() noexcept { values_->exception_ = std::current_exception(); }
 
-      // template <class Awaitable>
-      // CoStateAwaitable<Awaitable> await_transform(Awaitable&& _a) {
-      //   values_->state_ = CoStateState::AWAIT;
-      //   CoStateAwaitable<Awaitable> out(std::move(_a));
-      //   out.values_ = values_;
-      //   return out;
-      // };
+      template <class T>
+      CoStateAwaitable<Awaitable<T>> await_transform(Awaitable<T>&& _a) {
+        values_->state_ = CoStateState::AWAIT;
+        CoStateAwaitable<Awaitable<T>> out(std::move(_a));
+        out.values_ = values_;
+        return out;
+      };
 
       template <class T, class Allocator>
       CoStateAwaitable<TreeAwaitable<T, Allocator>> await_transform(TreeAwaitable<T, Allocator>&& _a) {
@@ -84,7 +112,7 @@ namespace TBT::Execute {
     Awaitable other_;
     std::shared_ptr<CoStateValues> values_;
     bool await_ready() noexcept { return false; }
-    void await_suspend(const std::coroutine_handle<CoState::promise_type>&) {}
+    void await_suspend(const std::coroutine_handle<CoState::promise_type>& _h) { other_.await_suspend(_h); }
     void await_resume() noexcept {}
     explicit CoStateAwaitable(Awaitable&& _other) : other_(std::forward<Awaitable>(_other)) {}
   };
@@ -165,11 +193,14 @@ namespace TBT::Execute {
   }  // namespace Concepts
 
   template <typename... Ts>
-  std::variant<std::remove_reference_t<Ts>...> tuple_element_to_variant(const std::tuple<Ts...>& tuple,
-                                                                        const size_t _index) {
-    std::variant<std::remove_reference_t<Ts>...> result;
-    size_t current = 0;
-    ((current++ == _index ? result = std::get<Ts>(std::move(tuple)) : result), ...);
+  Parameter tuple_element_to_variant(const std::tuple<Ts...>& tuple, size_t _index) {
+    Parameter result;
+    std::apply(
+        [&](const auto&... elements) {
+          size_t i = 0;
+          ((i++ == _index ? result = Parameter(elements) : result), ...);
+        },
+        tuple);
     return result;
   }  // tuple_element_to_variant
 
@@ -225,6 +256,7 @@ namespace TBT::Execute {
                 } else if constexpr (std::is_same_v<float, std::decay_t<std::remove_pointer_t<decltype(ptr)>>>) {
                   if (_pl[_idxs[i]].index() == 2) *ptr = std::get<2>(_pl[_idxs[i]]);
                 } else {
+                  // only bool, float and signed ints are allowed as static payload
                   std::unreachable();
                 }
               },
@@ -340,6 +372,15 @@ namespace TBT::Execute {
             return BUSY;
           }
           case RETURN: {  // the coroutine has co_returned
+            std::visit(
+                [&](auto& _t) {
+                  if constexpr (Concepts::has_exit_sig_1<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
+                    exit(_t, _states);
+                  else if constexpr (Concepts::has_exit_sig_2<std::decay_t<decltype(_t)>>)
+                    exit(_t);
+                },
+                *state);
+
             delete state;
             task.ptr_         = 0;
             task.co_          = 0;
@@ -539,6 +580,14 @@ namespace TBT::Execute {
             return BUSY;
           }
           case RETURN: {  // the coroutine has co_returned
+            std::visit(
+                [&](auto& _t) {
+                  if constexpr (Concepts::has_exit_sig_1<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
+                    exit(_t, _states);
+                  else if constexpr (Concepts::has_exit_sig_2<std::decay_t<decltype(_t)>>)
+                    exit(_t);
+                },
+                *state);
             delete state;
             task.ptr_         = 0;
             task.co_          = 0;

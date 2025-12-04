@@ -10,10 +10,10 @@ namespace TBT {
     struct CoStateValues;
   }
 
-  template <class T>
+  template <class T, class Values>
   struct Awaitable {
     T val_;
-    std::shared_ptr<Execute::CoStateValues> values_;
+    std::shared_ptr<Values> values_;
     std::function<T()> func_;
 
     Awaitable() = default;
@@ -76,9 +76,9 @@ namespace TBT::Execute {
       void unhandled_exception() noexcept { values_->exception_ = std::current_exception(); }
 
       template <class T>
-      CoStateAwaitable<Awaitable<T>> await_transform(Awaitable<T>&& _a) {
+      CoStateAwaitable<Awaitable<T, CoStateValues>> await_transform(Awaitable<T, CoStateValues>&& _a) {
         values_->state_ = CoStateState::AWAIT;
-        CoStateAwaitable<Awaitable<T>> out(std::move(_a));
+        CoStateAwaitable<Awaitable<T, CoStateValues>> out(std::move(_a));
         out.values_ = values_;
         return out;
       };
@@ -277,13 +277,19 @@ namespace TBT::Execute {
     Variant* v            = new Variant();
 
     auto construct_params = [&]<size_t... Is>(std::index_sequence<Is...>) {
-      ((Is == _idx ? ((*v = construct_task<std::variant_alternative_t<Is, Variant>>(_idxs, _pl, _params)), true)
-                   : false),
-       ...);
+      (
+          [&](auto I) {
+            if (I == _idx) { *v = construct_task<std::variant_alternative_t<Is, Variant>>(_idxs, _pl, _params); }
+          }(Is),
+          ...);
     };
 
     auto construct = [v, _idx]<size_t... Is>(std::index_sequence<Is...>) {
-      ((Is == _idx ? (v->template emplace<Is>(), true) : false), ...);
+      (
+          [&](auto I) {
+            if (I == _idx) v->template emplace<Is>();
+          }(Is),
+          ...);
     };
 
     if (_idxs.empty())
@@ -329,11 +335,11 @@ namespace TBT::Execute {
       // add offset to dynamic params
       for (const int32_t i : d_ics) idcs[i] += (uint32_t)payloads.size();
 
-      constexpr auto co_mask = Concepts::corun_mask_for<Variant, std::decay_t<StateProvider>>();
+      // constexpr auto co_mask = Concepts::corun_mask_for<Variant, std::decay_t<StateProvider>>();
 
-      Variant* state         = alloc_task<Variant>(_header.type_idx_, idcs, payloads, _params);
+      Variant* state   = alloc_task<Variant>(_header.type_idx_, idcs, payloads, _params);
 
-      const bool is_co       = std::visit(
+      const bool is_co = std::visit(
           [&](auto& _t) {
             if constexpr (Concepts::is_corun<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
               return true;
@@ -565,6 +571,8 @@ namespace TBT::Execute {
             if (a_done) co_handle.resume();
             break;
           }
+          default:
+            std::unreachable();
         }
 
         // check the coroutine after resuming

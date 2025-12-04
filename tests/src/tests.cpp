@@ -508,7 +508,7 @@ TEST_CASE("serialize helper functions", "[Compiler]") {
     constexpr int32_t c1                                                = 42;
     constexpr int32_t c2                                                = 43;
     constexpr int32_t c3                                                = 44;
-    constexpr std::array<uint8_t, RealSize::header + 3 * sizeof(42)> ar = [c1, c2, c3]() constexpr {
+    constexpr std::array<uint8_t, RealSize::header + 3 * sizeof(42)> ar = [&]() constexpr {
       std::array<uint8_t, RealSize::header + 3 * sizeof(42)> out = {};
       write_root_child(0, c1, out);
       write_root_child(1, c2, out);
@@ -529,7 +529,7 @@ TEST_CASE("serialize helper functions", "[Compiler]") {
     constexpr int32_t c1                                                     = 42;
     constexpr int32_t c2                                                     = 43;
     constexpr int32_t c3                                                     = 44;
-    constexpr std::array<uint8_t, RealSize::node_header + 3 * sizeof(42)> ar = [c1, c2, c3]() constexpr {
+    constexpr std::array<uint8_t, RealSize::node_header + 3 * sizeof(42)> ar = [&]() constexpr {
       std::array<uint8_t, RealSize::node_header + 3 * sizeof(42)> out = {};
       write_child(0, c1, out);
       write_child(1, c2, out);

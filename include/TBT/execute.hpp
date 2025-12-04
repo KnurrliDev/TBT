@@ -195,14 +195,20 @@ namespace TBT::Execute {
   template <typename... Ts>
   Parameter tuple_element_to_variant(const std::tuple<Ts...>& tuple, size_t _index) {
     Parameter result;
+
     std::apply(
         [&](const auto&... elements) {
           size_t i = 0;
-          ((i++ == _index ? result = Parameter(elements) : result), ...);
+          (([&] {
+             if (i == _index) { result = Parameter(elements); }
+             ++i;
+           }()),
+           ...);
         },
         tuple);
+
     return result;
-  }  // tuple_element_to_variant
+  }
 
   template <class Task, class... Ts>
   [[nodiscard]] Task construct_task(const std::vector<uint32_t>& _idxs,

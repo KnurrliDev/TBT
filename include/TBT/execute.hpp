@@ -113,7 +113,7 @@ namespace TBT::Execute {
     std::shared_ptr<CoStateValues> values_;
     bool await_ready() noexcept { return false; }
     void await_suspend(const std::coroutine_handle<CoState::promise_type>& _h) { other_.await_suspend(_h); }
-    void await_resume() noexcept {}
+    auto await_resume() noexcept { return other_.await_resume(); }
     explicit CoStateAwaitable(Awaitable&& _other) : other_(std::forward<Awaitable>(_other)) {}
   };
 

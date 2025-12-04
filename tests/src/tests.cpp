@@ -979,7 +979,8 @@ void exit(const TaskC& _t, States& _s) {
 template <class States>
 Execute::CoState co_run(TaskD& _t, States& _s) {
   _s.t_.push_back(std::format("co_await start [{}]", _t.val_));
-  co_await COMPILE_AND_QUEUE(0, "TaskE", _s, STEPWISE_1);
+  const State res = co_await COMPILE_AND_QUEUE(0, "TaskE", _s, STEPWISE_1);
+  assert(res == SUCCESS);
   _s.t_.push_back(std::format("co_await end [{}]", _t.val_));
   co_return SUCCESS;
 }

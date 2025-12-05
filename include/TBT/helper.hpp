@@ -52,7 +52,7 @@ namespace TBT {
     bool dirty_ = true;
   };  // TaskQueue
 
-#define EXECUTE_QUEUE(state_provider)                                                      \
+#define TBT_EXECUTE_QUEUE(state_provider)                                                  \
   if (!state_provider.tasks_queue_.q_.empty()) {                                           \
     if (state_provider.tasks_queue_.dirty_) {                                              \
       state_provider.tasks_queue_.dirty_ = false;                                          \
@@ -94,9 +94,9 @@ namespace TBT {
   }
 
 #ifdef __INTELLISENSE__
-#define COMPILE_AND_PREPARE(...) []() -> std::function<State()> { return []() { return SUCCESS; }; }();
+#define TBT_COMPILE_AND_PREPARE(...) []() -> std::function<State()> { return []() { return SUCCESS; }; }();
 #else
-#define COMPILE_AND_PREPARE(tree, states, ...)                                                        \
+#define TBT_COMPILE_AND_PREPARE(tree, states, ...)                                                    \
   TBT::Execute::prepare<typename std::decay_t<decltype(states)>::Variant>(                            \
       TBT::Compiler::compile_static<                                                                  \
           TBT::Compiler::compute_size_static<typename std::decay_t<decltype(states)>::Variant>(tree), \
@@ -104,17 +104,17 @@ namespace TBT {
       states __VA_OPT__(, ) __VA_ARGS__);
 #endif
 
-  template <class Variant, class Tree, class StateProvider, class... Ts>
-  [[nodiscard]] auto compile_and_prepare(const std::string_view& _tree, StateProvider& _states, Ts... _ts) {
-    return Execute::prepare<Variant>(compile_dynamic<Variant>(_tree), _states, std::forward<Ts>(_ts)...);
-  }  // d_compile_and_prepare
+  // template <class Variant, class Tree, class StateProvider, class... Ts>
+  // [[nodiscard]] auto compile_and_prepare(const std::string_view& _tree, StateProvider& _states, Ts... _ts) {
+  //   return Execute::prepare<Variant>(compile_dynamic<Variant>(_tree), _states, std::forward<Ts>(_ts)...);
+  // }  // d_compile_and_prepare
 
-#define COMPILE_AND_QUEUE(priority, tree, state_provider, mode, ...)                                         \
+#define TBT_RUN(priority, tree, state_provider, mode, ...)                                                   \
   [&]() -> auto {                                                                                            \
     TBT::ExecutionItem item;                                                                                 \
     item.priority_                     = priority;                                                           \
     item.mode_                         = mode;                                                               \
-    item.tree_                         = COMPILE_AND_PREPARE(tree, state_provider, __VA_ARGS__);             \
+    item.tree_                         = TBT_COMPILE_AND_PREPARE(tree, state_provider, __VA_ARGS__);         \
     state_provider.tasks_queue_.dirty_ = true;                                                               \
     std::future<TBT::State> f          = item.promise_.get_future();                                         \
     auto prev                          = state_provider.tasks_queue_.q_.before_begin();                      \
@@ -125,13 +125,13 @@ namespace TBT {
     return out;                                                                                              \
   }();
 
-#define COMPILE_AND_QUEUE_STEPWISE_1(priority, tree, state_provider, ...) \
-  COMPILE_AND_QUEUE(priority, tree, state_provider, TBT::STEPWISE_1, __VA_ARGS__)
-#define COMPILE_AND_QUEUE_STEPWISE_INF(priority, tree, state_provider, ...) \
-  COMPILE_AND_QUEUE(priority, tree, state_provider, TBT::STEPWISE_INF, __VA_ARGS__)
-#define COMPILE_AND_QUEUE_FULL_1(priority, tree, state_provider, ...) \
-  COMPILE_AND_QUEUE(priority, tree, state_provider, TBT::FULL_1, __VA_ARGS__)
-#define COMPILE_AND_QUEUE_FULL_INF(priority, tree, state_provider, ...) \
-  COMPILE_AND_QUEUE(priority, tree, state_provider, TBT::FULL_INF, __VA_ARGS__)
+#define TBT_RUN_STEPWISE_1(priority, tree, state_provider, ...) \
+  TBT_RUN(priority, tree, state_provider, TBT::STEPWISE_1, __VA_ARGS__)
+#define TBT_RUN_STEPWISE_INF(priority, tree, state_provider, ...) \
+  TBT_RUN(priority, tree, state_provider, TBT::STEPWISE_INF, __VA_ARGS__)
+#define TBT_RUN_FULL_1(priority, tree, state_provider, ...) \
+  TBT_RUN(priority, tree, state_provider, TBT::FULL_1, __VA_ARGS__)
+#define TBT_RUN_FULL_INF(priority, tree, state_provider, ...) \
+  TBT_RUN(priority, tree, state_provider, TBT::FULL_INF, __VA_ARGS__)
 
 }  // namespace TBT

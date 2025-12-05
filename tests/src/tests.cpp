@@ -979,7 +979,7 @@ void exit(const TaskC& _t, States& _s) {
 template <class States>
 Execute::CoState co_run(TaskD& _t, States& _s) {
   _s.t_.push_back(std::format("co_await start [{}]", _t.val_));
-  const State res = co_await COMPILE_AND_QUEUE(0, "TaskE", _s, STEPWISE_1);
+  const State res = co_await TBT_RUN(0, "TaskE", _s, STEPWISE_1);
   assert(res == SUCCESS);
   _s.t_.push_back(std::format("co_await end [{}]", _t.val_));
   co_return SUCCESS;
@@ -1069,9 +1069,9 @@ TEST_CASE("legacy", "[Execute]") {
 
   StateProvider<Variant1> sp;
 
-  auto p = COMPILE_AND_QUEUE(0, "TaskA($0)[TaskB($1), TaskC($2)] TaskA($3)", sp, STEPWISE_1, 10, 20, 30, 40);
+  auto p = TBT_RUN(0, "TaskA($0)[TaskB($1), TaskC($2)] TaskA($3)", sp, STEPWISE_1, 10, 20, 30, 40);
 
-  for (int32_t i = 0; i < 1000; ++i) { EXECUTE_QUEUE(sp) }
+  for (int32_t i = 0; i < 1000; ++i) { TBT_EXECUTE_QUEUE(sp) }
 
   REQUIRE(sp.t_[0] == "init [10]");
   REQUIRE(sp.t_[1] == "run [10]");
@@ -1097,9 +1097,9 @@ TEST_CASE("co-routines", "[Execute]") {
 
   StateProvider<Variant1> sp;
 
-  auto p = COMPILE_AND_QUEUE(0, "TaskD($0)[TaskE($1)]", sp, STEPWISE_1, 10, 20);
+  auto p = TBT_RUN(0, "TaskD($0)[TaskE($1)]", sp, STEPWISE_1, 10, 20);
 
-  for (int32_t i = 0; i < 1000; ++i) { EXECUTE_QUEUE(sp) }
+  for (int32_t i = 0; i < 1000; ++i) { TBT_EXECUTE_QUEUE(sp) }
 
   REQUIRE(sp.t_[0] == "co_await start [10]");
 
@@ -1122,9 +1122,9 @@ TEST_CASE("mixed", "[Execute]") {
 
   StateProvider<Variant1> sp;
 
-  auto p = COMPILE_AND_QUEUE(0, "TaskA($0)[TaskE($1)]", sp, STEPWISE_1, 10, 20);
+  auto p = TBT_RUN(0, "TaskA($0)[TaskE($1)]", sp, STEPWISE_1, 10, 20);
 
-  for (int32_t i = 0; i < 1000; ++i) { EXECUTE_QUEUE(sp) }
+  for (int32_t i = 0; i < 1000; ++i) { TBT_EXECUTE_QUEUE(sp) }
 
   REQUIRE(sp.t_[0] == "init [10]");
   REQUIRE(sp.t_[1] == "run [10]");

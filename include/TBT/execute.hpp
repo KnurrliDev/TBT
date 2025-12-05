@@ -10,27 +10,27 @@ namespace TBT {
     struct CoStateValues;
   }
 
-  template <class T, class Values>
+  //--------------------------------------------
+  // Signature for all awaitables
+  template <class T>
   struct Awaitable {
     T val_;
-    std::shared_ptr<Values> values_;
-    std::function<T()> func_;
+    //  values_ will be populated by the promise
+    std::shared_ptr<Execute::CoStateValues> values_;
 
     Awaitable() = default;
 
+    // if this functions returns true values_->set_done() needs to be called
     bool await_ready() noexcept { return false; }
 
     template <class Handle>
     void await_suspend(const Handle&) {
-      init_awaitable([v = values_]() {
-        assert(v);
-        v->a_done_ = true;
-      });
+      // when the awaitable is done values_->set_done() needs to be called
+
+      values_->a_done_();
     }
 
     T await_resume() noexcept { return val_; }
-
-    virtual void init_awaitable(std::function<void()> _set_done) = 0;
 
   };  // Awaitable
 }  // namespace TBT
@@ -47,6 +47,7 @@ namespace TBT::Execute {
     CoStateState state_;
     std::exception_ptr exception_;
     bool a_done_ = false;
+    void set_done() { a_done_ = true; }
   };  // CoStateValues
 
   struct CoState {
@@ -76,10 +77,11 @@ namespace TBT::Execute {
       void unhandled_exception() noexcept { values_->exception_ = std::current_exception(); }
 
       template <class T>
-      CoStateAwaitable<Awaitable<T, CoStateValues>> await_transform(Awaitable<T, CoStateValues>&& _a) {
+      CoStateAwaitable<Awaitable<T>> await_transform(Awaitable<T>&& _a) {
         values_->state_ = CoStateState::AWAIT;
-        CoStateAwaitable<Awaitable<T, CoStateValues>> out(std::move(_a));
-        out.values_ = values_;
+        _a.values_      = values_;
+        CoStateAwaitable<Awaitable<T>> out(std::move(_a));
+        // out.values_ = values_;
         return out;
       };
 
@@ -88,7 +90,7 @@ namespace TBT::Execute {
         values_->state_  = CoStateState::AWAIT;
         _a.ref_->values_ = values_;
         CoStateAwaitable<TreeAwaitable<T, Allocator>> out(std::move(_a));
-        out.values_ = values_;
+        // out.values_ = values_;
         return out;
       };
 
@@ -110,8 +112,7 @@ namespace TBT::Execute {
   template <class Awaitable>
   struct CoStateAwaitable {
     Awaitable other_;
-    std::shared_ptr<CoStateValues> values_;
-    bool await_ready() noexcept { return false; }
+    bool await_ready() noexcept { return other_.await_ready(); }
     void await_suspend(const std::coroutine_handle<CoState::promise_type>& _h) { other_.await_suspend(_h); }
     auto await_resume() noexcept { return other_.await_resume(); }
     explicit CoStateAwaitable(Awaitable&& _other) : other_(std::forward<Awaitable>(_other)) {}
@@ -195,20 +196,14 @@ namespace TBT::Execute {
   template <typename... Ts>
   Parameter tuple_element_to_variant(const std::tuple<Ts...>& tuple, size_t _index) {
     Parameter result;
-
     std::apply(
         [&](const auto&... elements) {
           size_t i = 0;
-          (([&] {
-             if (i == _index) { result = Parameter(elements); }
-             ++i;
-           }()),
-           ...);
+          ((i++ == _index ? result = Parameter(elements) : result), ...);
         },
         tuple);
-
     return result;
-  }
+  }  // tuple_element_to_variant
 
   template <class Task, class... Ts>
   [[nodiscard]] Task construct_task(const std::vector<uint32_t>& _idxs,
@@ -283,19 +278,13 @@ namespace TBT::Execute {
     Variant* v            = new Variant();
 
     auto construct_params = [&]<size_t... Is>(std::index_sequence<Is...>) {
-      (
-          [&](auto I) {
-            if (I == _idx) { *v = construct_task<std::variant_alternative_t<Is, Variant>>(_idxs, _pl, _params); }
-          }(Is),
-          ...);
+      ((Is == _idx ? ((*v = construct_task<std::variant_alternative_t<Is, Variant>>(_idxs, _pl, _params)), true)
+                   : false),
+       ...);
     };
 
     auto construct = [v, _idx]<size_t... Is>(std::index_sequence<Is...>) {
-      (
-          [&](auto I) {
-            if (I == _idx) v->template emplace<Is>();
-          }(Is),
-          ...);
+      ((Is == _idx ? (v->template emplace<Is>(), true) : false), ...);
     };
 
     if (_idxs.empty())
@@ -341,11 +330,11 @@ namespace TBT::Execute {
       // add offset to dynamic params
       for (const int32_t i : d_ics) idcs[i] += (uint32_t)payloads.size();
 
-      // constexpr auto co_mask = Concepts::corun_mask_for<Variant, std::decay_t<StateProvider>>();
+      constexpr auto co_mask = Concepts::corun_mask_for<Variant, std::decay_t<StateProvider>>();
 
-      Variant* state   = alloc_task<Variant>(_header.type_idx_, idcs, payloads, _params);
+      Variant* state         = alloc_task<Variant>(_header.type_idx_, idcs, payloads, _params);
 
-      const bool is_co = std::visit(
+      const bool is_co       = std::visit(
           [&](auto& _t) {
             if constexpr (Concepts::is_corun<std::decay_t<decltype(_t)>, std::decay_t<StateProvider>>)
               return true;
@@ -577,8 +566,6 @@ namespace TBT::Execute {
             if (a_done) co_handle.resume();
             break;
           }
-          default:
-            std::unreachable();
         }
 
         // check the coroutine after resuming

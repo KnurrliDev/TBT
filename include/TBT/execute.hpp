@@ -29,7 +29,7 @@ namespace TBT {
       // IMPORTANT: under no circumstance ever call .resume() on the coroutine handle
       // when the awaitable is done values_->set_done() needs to be called
 
-      values_->a_done_();
+      values_->set_done();
     }
 
     T await_resume() noexcept { return val_; }
@@ -730,10 +730,10 @@ namespace TBT::Execute {
   // prepares for the execution of a tree
   template <class Variant, class Tree, class StateProvider, class... Ts>
   [[nodiscard]] std::function<State()> prepare(Tree _tree, StateProvider& _states, Ts... _ts) {
-    return
-        [tree = std::move(_tree), states = std::ref(_states), params = std::make_tuple(std::move(_ts)...)]() -> State {
-          return execute_step<Variant>(*const_cast<Tree*>(&tree), states.get(), params);
-        };
+    return [tree = std::move(_tree), states = std::ref(_states),
+            params = std::make_tuple(std::move(_ts)...)]() mutable -> State {
+      return execute_step<Variant>(tree, states.get(), params);
+    };
   }  // prepare
 
 }  // namespace TBT::Execute

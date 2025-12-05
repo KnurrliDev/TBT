@@ -1,11 +1,16 @@
 # TBT
 
+> [!WARNING]
+> This library is far from stable and very much in constant development. The documentation is still very incomplete and features, the api or naming can change without warning.
+
+
 **TBT** is a **header-only**, **purely functional**, **compile-time parsed** hierarchical task framework for modern C++.
 
 No inheritance. No virtual calls.  
 Just clean, declarative, human-readable tree definitions — fully resolved and validated at **compile time**.
 
 Perfect for games, robotics, animation systems, tools, or any domain that benefits from composable, data-oriented logic.
+
 
 ## Features
 - Fully static & functional task composition
@@ -75,6 +80,12 @@ Nevertheless, coroutines allow to write very clear, linear code. See the example
 ## Macro Magic (Task Registration)
 
 A core feature of the framework is the automatic collection of all task types into a comma-separated list inside a `std::variant`. True reflection will make this trivial in C++26, but until then we rely on black macro magic.
+
+> [!IMPORTANT]  
+> A detailed explanation of the macro's inner workings is beyond the scope of this README.  
+> The technique is thoroughly documented in [Jackson Allan's excellent article](https://github.com/JacksonAllan/CC/blob/main/articles/Better_C_Generics_Part_1_The_Extendible_Generic.md).  
+>   
+> This entire library exists only because of Jackson's work on extensible generics in C. Huge thanks to [Jackson Allan](https://github.com/JacksonAllan) — this library would not exist without him. (At least until C++26...)
 
 **Important:** Follow the exact pattern below — the include is mandatory.
 
@@ -149,7 +160,7 @@ CoState co_run(const TaskB& t, States& s) {
     // we can co_await trees very easily
     // this statically compiles the tree, will run once every frame until completion
     // and takes img as dynamic parameter.
-    State res = co_await COMPILE_AND_QUEUE("PostProcessImageTask($0)", s, SINGLE_1, img);
+    State res = co_await TBT_RUN("PostProcessImageTask($0)", s, SINGLE_1, img);
 
     // for example we draw this image every frame
 
@@ -194,7 +205,7 @@ int main() {
     // Compile-time parsed tree with parameters and nesting!
     // the awaitable gives access to an iterator, and the future.
     // mostly unused and just discarded
-    auto awaitable = COMPILE_AND_QUEUE(
+    auto awaitable = TBT_RUN(
         "TaskA, "
         "TaskA($0)[TaskB(5)[TaskA, TaskB]] "  // $0 = -5 → TaskA(-5)
         "TaskA[TaskB($1)]",                   // $1 = 99 → TaskB(99)
@@ -206,7 +217,7 @@ int main() {
 
     // Main loop
     while (true) {
-        EXECUTE_QUEUE(states);  // Processes all active trees
+        TBT_EXECUTE_QUEUE(states);  // Processes all active trees
 
         // Your game/frame update here...
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
@@ -237,13 +248,13 @@ For longer running tasks or when tasks should share a common state a shared stat
 //define your state
 std::shared_ptr<TaskState> ptr = std::make_shared...
 //hand the state to all tasks
-COMPILE_AND_QUEUE_FULL_INF(0, "Some($0), Example($0), Tree($0)", state_provider, ptr);
+TBT_RUN_FULL_INF(0, "Some($0), Example($0), Tree($0)", state_provider, ptr);
 ```
 ## Terminating a task/ tree
 When queueing a new task the macro returns a pair containing a std::future\<TBT::State> and a iterator to the item in the queue. ~~The iterator can be used to erase the element~~. Important: Don't erase the element while it is executing, this leads to memory leaks.
 
 ```cpp
-    const auto&[future, tree_iterator] = COMPILE_AND_QUEUE_FULL_INF(0, "Some, Example, Tree", state_provider);
+    const auto&[future, tree_iterator] = TBT_RUN_FULL_INF(0, "Some, Example, Tree", state_provider);
 ```
 
 Instead terminate the task from inside with return FAILED or wait for termination of the tree.
@@ -253,12 +264,12 @@ For all the following examples it is assumed the framework is set up properly. A
 ### Executing a full tree every frame
 This will run the tree every frame until SUCCESS or FAILED is returned. Be weary of returning BUSY in a task. It might lead to being stuck.
 ```cpp
-COMPILE_AND_QUEUE_FULL_INF(0, "Some, Example, Tree", state_provider);
+TBT_RUN_FULL_INF(0, "Some, Example, Tree", state_provider);
 ```
 ### Executing a tree node by node a single time
 This will call the tree once every frame until SUCCESS or FAILED is returned. In this case it is perfectly fine to return BUSY.
 ```cpp
-COMPILE_AND_QUEUE_STEPWISE_1(0, "Some, Example, Tree", state_provider);
+TBT_RUN_STEPWISE_1(0, "Some, Example, Tree", state_provider);
 ```
 ### Async task using an executor
 This example shows how convenient it to async load a file from disk using Imgui. For example purposes it uses a taskflow executor.
@@ -314,7 +325,7 @@ if(Imgui::Button("Load File")){
     //path from file. for example from file picker.
     const std::filesystem::path = ...;
     //move here to avoid a copy
-    COMPILE_AND_QUEUE_STEPWISE_1(0, "LoadFileFromDiskTask($0)", state_provider, std::move(path));
+    TBT_RUN_STEPWISE_1(0, "LoadFileFromDiskTask($0)", state_provider, std::move(path));
 }
 ```
 
@@ -360,7 +371,7 @@ if(Imgui::Button("Load File")){
     //path from file. for example from file picker.
     const std::filesystem::path = ...;
     //move here to avoid a copy
-    COMPILE_AND_QUEUE_STEPWISE_1(0, "LoadFileFromDiskTask($0)", state_provider, std::move(path));
+    TBT_RUN_STEPWISE_1(0, "LoadFileFromDiskTask($0)", state_provider, std::move(path));
 }
 ```
 
@@ -375,7 +386,7 @@ TBT::State run(LoadFileFromDiskTask& _task, StateProvider<Variant>& _state){
         if(_task.async.wait_for(std::chrono::seconds(0)) == std::future_status::ready){
             //this is a good usecase for a shared state to make data transfer easier.
             _task.shared_state_->file_ = _task.async.get();
-            _task.wait_for_pp_ = COMPILE_AND_QUEUE_STEPWISE_1(0, "PostProcessFile($0)", _state, _task.shared_state_);
+            _task.wait_for_pp_ = TBT_RUN_STEPWISE_1(0, "PostProcessFile($0)", _state, _task.shared_state_);
             _task.file_loaded_ = true;
             return TBT::BUSY;
         }
@@ -400,7 +411,7 @@ CoState co_run(LoadFileFromDiskTask& _task, StateProvider<Variant>& _state){
     // the awaitable needs to call the executor on its own. this might need some boilerplate
     auto file = co_await load_from_disk(_task.path_to_file);
 
-    co_await COMPILE_AND_QUEUE_STEPWISE_1(0, "PostProcessFile($0)", _state, _task.shared_state_);
+    co_await TBT_RUN_STEPWISE_1(0, "PostProcessFile($0)", _state, _task.shared_state_);
 
     // send the finished file back to caller
     _state.events_.dispatch(FILE_LOADED_EVENT, std::move(file));

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <TBT/compiler.hpp>
+#include <atomic>
 
 namespace TBT {
   template <class T, class Allocator>
@@ -25,6 +26,7 @@ namespace TBT {
 
     template <class Handle>
     void await_suspend(const Handle&) {
+      // IMPORTANT: under no circumstance ever call .resume() on the coroutine handle
       // when the awaitable is done values_->set_done() needs to be called
 
       values_->a_done_();
@@ -46,7 +48,7 @@ namespace TBT::Execute {
     State val_;
     CoStateState state_;
     std::exception_ptr exception_;
-    bool a_done_ = false;
+    std::atomic<bool> a_done_ = false;
     void set_done() { a_done_ = true; }
   };  // CoStateValues
 

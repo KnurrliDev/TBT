@@ -662,7 +662,7 @@ struct glz::meta<JumpTask> {
 };
 
 TEST_CASE("tuple_element_to_variant extracts the correct element", "[utility]") {
-  auto tup = std::make_tuple(42, 3.14f, true, -42, std::make_shared<int>());
+  auto tup = std::make_tuple(42, 3.14f, true, -42, std::make_shared<int>(-42));
 
   auto v0  = Execute::tuple_element_to_variant(tup, 0);
   auto v1  = Execute::tuple_element_to_variant(tup, 1);

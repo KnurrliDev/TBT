@@ -70,6 +70,7 @@ namespace TBT {
             item.promise_.set_value(r);                                                    \
             if (item.values_) item.values_->a_done_ = true;                                \
             curr = state_provider.tasks_queue_.q_.erase_after(prev);                       \
+            continue;                                                                      \
           }                                                                                \
           break;                                                                           \
         }                                                                                  \
@@ -82,7 +83,7 @@ namespace TBT {
           while ((r = item.tree_()) != TBT::BUSY) {}                                       \
           item.promise_.set_value(r);                                                      \
           curr = state_provider.tasks_queue_.q_.erase_after(prev);                         \
-          break;                                                                           \
+          continue;                                                                        \
         }                                                                                  \
         case TBT::FULL_INF: {                                                              \
           while ((item.tree_()) != TBT::BUSY) {}                                           \

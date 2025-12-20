@@ -195,17 +195,34 @@ namespace TBT::Execute {
 
   }  // namespace Concepts
 
-  template <typename... Ts>
-  Parameter tuple_element_to_variant(const std::tuple<Ts...>& tuple, size_t _index) {
-    Parameter result;
-    std::apply(
-        [&](const auto&... elements) {
-          size_t i = 0;
-          ((i++ == _index ? result = Parameter(elements) : result), ...);
-        },
-        tuple);
-    return result;
-  }  // tuple_element_to_variant
+  // template <typename... Ts>
+  // std::variant<std::decay_t<Ts>...> tuple_element_to_variant(const std::tuple<Ts...>& tuple, size_t _index) {
+  //   std::variant<std::decay_t<Ts>...> result;
+  //   std::apply(
+  //       [&](const auto&... elements) {
+  //         size_t i = 0;
+  //         ((i++ == _index ? (result = elements) : result), ...);
+  //       },
+  //       tuple);
+  //   return result;
+  // }  // tuple_element_to_variant
+
+  namespace detail {
+    template <std::size_t I, class... Ts>
+    std::variant<Ts...> to_variant(const std::tuple<Ts...>& tt) {
+      return std::variant<Ts...>(std::in_place_index<I>, std::get<I>(tt));
+    }
+
+  }  // namespace detail
+
+  template <class... Ts>
+  std::variant<Ts...> tuple_element_to_variant(const std::tuple<Ts...>& t, size_t i) {
+    constexpr auto table = [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+      return std::array<std::variant<Ts...> (*)(std::tuple<Ts...> const&), sizeof...(Is)>{&detail::to_variant<Is>...};
+    }(std::make_index_sequence<sizeof...(Ts)>());
+
+    return table[i](t);
+  }
 
   template <class Task, class... Ts>
   [[nodiscard]] Task construct_task(const std::vector<uint32_t>& _idxs,
@@ -214,7 +231,8 @@ namespace TBT::Execute {
     static_assert(std::is_class_v<Task>, "Task must be a class/struct");
 
     // this creates a copy of all params. maybe not the best way
-    const auto& args         = _params;
+    const auto args          = _params;
+
     constexpr auto args_size = std::tuple_size_v<std::decay_t<decltype(_params)>>;
     constexpr auto N         = glz::reflect<Task>::size;
 

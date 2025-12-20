@@ -662,24 +662,28 @@ struct glz::meta<JumpTask> {
 };
 
 TEST_CASE("tuple_element_to_variant extracts the correct element", "[utility]") {
-  auto tup = std::make_tuple(42, 3.14f, true, -42);
+  auto tup = std::make_tuple(42, 3.14f, true, -42, std::make_shared<int>());
 
   auto v0  = Execute::tuple_element_to_variant(tup, 0);
   auto v1  = Execute::tuple_element_to_variant(tup, 1);
   auto v2  = Execute::tuple_element_to_variant(tup, 2);
   auto v3  = Execute::tuple_element_to_variant(tup, 3);
+  auto v4  = Execute::tuple_element_to_variant(tup, 4);
 
-  REQUIRE(std::holds_alternative<int32_t>(v0));
-  REQUIRE(std::get<int32_t>(v0) == 42);
+  // REQUIRE(std::holds_alternative<int32_t>(v0));
+  REQUIRE(std::get<0>(v0) == 42);
 
   REQUIRE(std::holds_alternative<float>(v1));
-  REQUIRE(std::get<float>(v1) == 3.14f);
+  REQUIRE(std::get<1>(v1) == 3.14f);
 
   REQUIRE(std::holds_alternative<bool>(v2));
-  REQUIRE(std::get<bool>(v2) == true);
+  REQUIRE(std::get<2>(v2) == true);
 
-  REQUIRE(std::holds_alternative<int32_t>(v3));
-  REQUIRE(std::get<int32_t>(v3) == -42);
+  // REQUIRE(std::holds_alternative<int32_t>(v3));
+  REQUIRE(std::get<3>(v3) == -42);
+
+  REQUIRE(std::holds_alternative<std::shared_ptr<int>>(v4));
+  REQUIRE(*std::get<4>(v4) == -42);
 }
 
 TEST_CASE("construct_task - only static payload", "[construct_task]") {

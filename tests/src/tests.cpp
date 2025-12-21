@@ -1071,54 +1071,112 @@ struct StateProvider {
 TEST_CASE("legacy", "[Execute]") {
   using Variant1 = std::variant<TaskA, TaskB, TaskC, TaskD, TaskE>;
 
-  StateProvider<Variant1> sp;
+  StateProvider<Variant1> state_provider;
 
-  auto p = TBT_RUN(0, "TaskA($0)[TaskB($1), TaskC($2)] TaskA($3)", sp, STEPWISE_1, 10, 20, 30, 40);
+  // auto p = TBT_RUN(0, "TaskA($0)[TaskB($1), TaskC($2)] TaskA($3)", sp, STEPWISE_1, 10, 20, 30, 40);
 
-  for (int32_t i = 0; i < 1000; ++i) { TBT_EXECUTE_QUEUE(sp) }
+  auto p = [&]() -> auto {
+    TBT::ExecutionItem item;
+    item.last_update_ = state_provider.tasks_queue_.cur_frame_;
+    item.priority_    = 0;
+    item.mode_        = STEPWISE_1;
+    item.tree_ = TBT_COMPILE_AND_PREPARE("TaskA($0)[TaskB($1), TaskC($2)] TaskA($3)", state_provider, 10, 20, 30, 40);
+    state_provider.tasks_queue_.dirty_ = true;
+    std::future<TBT::State> f          = item.promise_.get_future();
+    state_provider.tasks_queue_.q_.push_back(std::move(item));
+    TBT::TreeAwaitable<TBT::ExecutionItem> out;
+    out.future_ = std::move(f);
+    out.ref_    = std::prev(state_provider.tasks_queue_.q_.end());
+    return out;
+  }();
 
-  REQUIRE(sp.t_[0] == "init [10]");
-  REQUIRE(sp.t_[1] == "run [10]");
-  REQUIRE(sp.t_[2] == "exit [10]");
+  for (int32_t i = 0; i < 1000; ++i) {
+    state_provider.tasks_queue_.cur_frame_++;
+    if (!state_provider.tasks_queue_.q_.empty()) {
+      if (state_provider.tasks_queue_.dirty_) {
+        state_provider.tasks_queue_.dirty_ = false;
+        state_provider.tasks_queue_.q_.sort(
+            [](const auto& _v1, const auto& _v2) { return _v1.priority_ > _v2.priority_; });
+      }
+      auto& queue = state_provider.tasks_queue_.q_;
+      for (auto curr = queue.begin(); curr != queue.end(); ++curr) {
+        TBT::ExecutionItem& item = *curr;
+        if (item.last_update_ == state_provider.tasks_queue_.cur_frame_) continue;
+        item.last_update_ = state_provider.tasks_queue_.cur_frame_;
+        switch (item.mode_) {
+          case TBT::STEPWISE_1: {
+            TBT::State r = item.tree_();
+            if (r != TBT::BUSY) {
+              item.promise_.set_value(r);
+              if (item.values_) item.values_->set_done();
+              curr = queue.erase(curr);
+            }
+            break;
+          }
+          case TBT::STEPWISE_INF: {
+            item.tree_();
+            break;
+          }
+          case TBT::FULL_1: {
+            TBT::State r = TBT::State::SUCCESS;
+            while ((r = item.tree_()) != TBT::BUSY) {}
+            item.promise_.set_value(r);
+            if (item.values_) item.values_->set_done();
+            curr = queue.erase(curr);
+            break;
+          }
+          case TBT::FULL_INF: {
+            while ((item.tree_()) != TBT::BUSY) {}
+            break;
+          }
+        }
+        if (curr == queue.end()) break;
+      }
+    }
+  }
 
-  REQUIRE(sp.t_[3] == "init [20]");
-  REQUIRE(sp.t_[4] == "run [20]");
-  REQUIRE(sp.t_[5] == "exit [20]");
+  REQUIRE(state_provider.t_[0] == "init [10]");
+  REQUIRE(state_provider.t_[1] == "run [10]");
+  REQUIRE(state_provider.t_[2] == "exit [10]");
 
-  REQUIRE(sp.t_[6] == "init [30]");
-  REQUIRE(sp.t_[7] == "run [30]");
-  REQUIRE(sp.t_[8] == "run [30]");
-  REQUIRE(sp.t_[9] == "run [30]");
-  REQUIRE(sp.t_[10] == "exit [30]");
+  REQUIRE(state_provider.t_[3] == "init [20]");
+  REQUIRE(state_provider.t_[4] == "run [20]");
+  REQUIRE(state_provider.t_[5] == "exit [20]");
 
-  REQUIRE(sp.t_[11] == "init [40]");
-  REQUIRE(sp.t_[12] == "run [40]");
-  REQUIRE(sp.t_[13] == "exit [40]");
+  REQUIRE(state_provider.t_[6] == "init [30]");
+  REQUIRE(state_provider.t_[7] == "run [30]");
+  REQUIRE(state_provider.t_[8] == "run [30]");
+  REQUIRE(state_provider.t_[9] == "run [30]");
+  REQUIRE(state_provider.t_[10] == "exit [30]");
+
+  REQUIRE(state_provider.t_[11] == "init [40]");
+  REQUIRE(state_provider.t_[12] == "run [40]");
+  REQUIRE(state_provider.t_[13] == "exit [40]");
 }
 
 TEST_CASE("co-routines", "[Execute]") {
   using Variant1 = std::variant<TaskA, TaskB, TaskC, TaskD, TaskE>;
 
-  StateProvider<Variant1> sp;
+  StateProvider<Variant1> state_provider;
 
-  auto p = TBT_RUN(0, "TaskD($0)[TaskE($1)]", sp, STEPWISE_1, 10, 20);
+  auto p = TBT_RUN(0, "TaskD($0)[TaskE($1)]", state_provider, STEPWISE_1, 10, 20);
 
-  for (int32_t i = 0; i < 1000; ++i) { TBT_EXECUTE_QUEUE(sp) }
+  for (int32_t i = 0; i < 1000; ++i) { TBT_EXECUTE_QUEUE(state_provider) }
 
-  REQUIRE(sp.t_[0] == "co_await start [10]");
+  REQUIRE(state_provider.t_[0] == "co_await start [10]");
 
-  REQUIRE(sp.t_[1] == "co_yield [50]");
-  REQUIRE(sp.t_[2] == "co_yield [50]");
-  REQUIRE(sp.t_[3] == "co_yield [50]");
-  REQUIRE(sp.t_[4] == "exit [50]");
+  REQUIRE(state_provider.t_[1] == "co_yield [50]");
+  REQUIRE(state_provider.t_[2] == "co_yield [50]");
+  REQUIRE(state_provider.t_[3] == "co_yield [50]");
+  REQUIRE(state_provider.t_[4] == "exit [50]");
 
-  REQUIRE(sp.t_[5] == "co_await end [10]");
-  REQUIRE(sp.t_[6] == "exit [10]");
+  REQUIRE(state_provider.t_[5] == "co_await end [10]");
+  REQUIRE(state_provider.t_[6] == "exit [10]");
 
-  REQUIRE(sp.t_[7] == "co_yield [20]");
-  REQUIRE(sp.t_[8] == "co_yield [20]");
-  REQUIRE(sp.t_[9] == "co_yield [20]");
-  REQUIRE(sp.t_[10] == "exit [20]");
+  REQUIRE(state_provider.t_[7] == "co_yield [20]");
+  REQUIRE(state_provider.t_[8] == "co_yield [20]");
+  REQUIRE(state_provider.t_[9] == "co_yield [20]");
+  REQUIRE(state_provider.t_[10] == "exit [20]");
 }
 
 TEST_CASE("mixed", "[Execute]") {

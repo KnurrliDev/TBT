@@ -15,22 +15,26 @@ namespace TBT {
     ExecutionItem(const ExecutionItem&)            = delete;
     ExecutionItem& operator=(const ExecutionItem&) = delete;
 
-    std::shared_ptr<Execute::CoStateValues> values_;
-    int32_t priority_ = 0;
+    // std::shared_ptr<Execute::CoStateState> values_;
+    int32_t priority_                              = 0;
     ExecutionMode mode_;
     std::function<TBT::State()> tree_;
     std::promise<TBT::State> promise_;
+    std::shared_ptr<Execute::CoStateValues> values_;
+    size_t last_update_;
   };  // ExecutionItem
 
   template <class Allocator = std::allocator<ExecutionItem>>
-  using TreeRef = typename std::forward_list<ExecutionItem, Allocator>::iterator;
+  using TreeRef = typename std::list<ExecutionItem, Allocator>::iterator;
 
   template <class T, class Allocator = std::allocator<T>>
   struct TreeAwaitable {
     std::future<TBT::State> future_;
     TreeRef<Allocator> ref_;
 
-    bool await_ready() noexcept { return false; }
+    bool await_ready() noexcept {
+      return false;  //
+    }
 
     void await_suspend(const std::coroutine_handle<Execute::CoState::promise_type>&) {}
     State await_resume() noexcept { return future_.get(); }
@@ -48,29 +52,31 @@ namespace TBT {
 
   template <class Allocator = std::allocator<ExecutionItem>>
   struct TaskQueue {
-    std::forward_list<ExecutionItem, Allocator> q_;
-    bool dirty_ = true;
+    std::list<ExecutionItem, Allocator> q_;
+    bool dirty_       = true;
+    size_t cur_frame_ = 0;
   };  // TaskQueue
 
 #define TBT_EXECUTE_QUEUE(state_provider)                                                  \
+  state_provider.tasks_queue_.cur_frame_++;                                                \
   if (!state_provider.tasks_queue_.q_.empty()) {                                           \
     if (state_provider.tasks_queue_.dirty_) {                                              \
       state_provider.tasks_queue_.dirty_ = false;                                          \
       state_provider.tasks_queue_.q_.sort(                                                 \
           [](const auto& _v1, const auto& _v2) { return _v1.priority_ > _v2.priority_; }); \
     }                                                                                      \
-    auto prev = state_provider.tasks_queue_.q_.before_begin();                             \
-    auto curr = state_provider.tasks_queue_.q_.begin();                                    \
-    while (curr != state_provider.tasks_queue_.q_.end()) {                                 \
+    auto& queue = state_provider.tasks_queue_.q_;                                          \
+    for (auto curr = queue.begin(); curr != queue.end(); ++curr) {                         \
       TBT::ExecutionItem& item = *curr;                                                    \
+      if (item.last_update_ == state_provider.tasks_queue_.cur_frame_) continue;           \
+      item.last_update_ = state_provider.tasks_queue_.cur_frame_;                          \
       switch (item.mode_) {                                                                \
         case TBT::STEPWISE_1: {                                                            \
           TBT::State r = item.tree_();                                                     \
           if (r != TBT::BUSY) {                                                            \
             item.promise_.set_value(r);                                                    \
-            if (item.values_) item.values_->a_done_ = true;                                \
-            curr = state_provider.tasks_queue_.q_.erase_after(prev);                       \
-            continue;                                                                      \
+            if (item.values_) item.values_->set_done();                                    \
+            curr = queue.erase(curr);                                                      \
           }                                                                                \
           break;                                                                           \
         }                                                                                  \
@@ -82,15 +88,16 @@ namespace TBT {
           TBT::State r = TBT::State::SUCCESS;                                              \
           while ((r = item.tree_()) != TBT::BUSY) {}                                       \
           item.promise_.set_value(r);                                                      \
-          curr = state_provider.tasks_queue_.q_.erase_after(prev);                         \
-          continue;                                                                        \
+          if (item.values_) item.values_->set_done();                                      \
+          curr = queue.erase(curr);                                                        \
+          break;                                                                           \
         }                                                                                  \
         case TBT::FULL_INF: {                                                              \
           while ((item.tree_()) != TBT::BUSY) {}                                           \
           break;                                                                           \
         }                                                                                  \
       }                                                                                    \
-      if (curr != state_provider.tasks_queue_.q_.end()) curr++;                            \
+      if (curr == queue.end()) break;                                                      \
     }                                                                                      \
   }
 
@@ -110,20 +117,20 @@ namespace TBT {
   //   return Execute::prepare<Variant>(compile_dynamic<Variant>(_tree), _states, std::forward<Ts>(_ts)...);
   // }  // d_compile_and_prepare
 
-#define TBT_RUN(priority, tree, state_provider, mode, ...)                                                   \
-  [&]() -> auto {                                                                                            \
-    TBT::ExecutionItem item;                                                                                 \
-    item.priority_                     = priority;                                                           \
-    item.mode_                         = mode;                                                               \
-    item.tree_                         = TBT_COMPILE_AND_PREPARE(tree, state_provider, __VA_ARGS__);         \
-    state_provider.tasks_queue_.dirty_ = true;                                                               \
-    std::future<TBT::State> f          = item.promise_.get_future();                                         \
-    auto prev                          = state_provider.tasks_queue_.q_.before_begin();                      \
-    auto ref                           = state_provider.tasks_queue_.q_.insert_after(prev, std::move(item)); \
-    TBT::TreeAwaitable<TBT::ExecutionItem> out;                                                              \
-    out.future_ = std::move(f);                                                                              \
-    out.ref_    = ref;                                                                                       \
-    return out;                                                                                              \
+#define TBT_RUN(priority, tree, state_provider, mode, ...)                                           \
+  [&]() -> auto {                                                                                    \
+    TBT::ExecutionItem item;                                                                         \
+    item.last_update_                  = state_provider.tasks_queue_.cur_frame_;                     \
+    item.priority_                     = priority;                                                   \
+    item.mode_                         = mode;                                                       \
+    item.tree_                         = TBT_COMPILE_AND_PREPARE(tree, state_provider, __VA_ARGS__); \
+    state_provider.tasks_queue_.dirty_ = true;                                                       \
+    std::future<TBT::State> f          = item.promise_.get_future();                                 \
+    state_provider.tasks_queue_.q_.push_back(std::move(item));                                       \
+    TBT::TreeAwaitable<TBT::ExecutionItem> out;                                                      \
+    out.future_ = std::move(f);                                                                      \
+    out.ref_    = std::prev(state_provider.tasks_queue_.q_.end());                                   \
+    return out;                                                                                      \
   }();
 
 #define TBT_RUN_STEPWISE_1(priority, tree, state_provider, ...) \

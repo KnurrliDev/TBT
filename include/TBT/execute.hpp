@@ -62,7 +62,7 @@ namespace TBT::Execute {
       }
 
       std::suspend_never initial_suspend() noexcept { return {}; }
-      std::suspend_never final_suspend() noexcept { return {}; }
+      std::suspend_always final_suspend() noexcept { return {}; }
 
       template <class T>
       std::suspend_always yield_value(T&&) {
@@ -89,10 +89,10 @@ namespace TBT::Execute {
 
       template <class T, class Allocator>
       CoStateAwaitable<TreeAwaitable<T, Allocator>> await_transform(TreeAwaitable<T, Allocator>&& _a) {
-        values_->state_  = CoStateState::AWAIT;
-        _a.ref_->values_ = values_;
+        values_->state_ = CoStateState::AWAIT;
+        //_a.values_      = values_;
         CoStateAwaitable<TreeAwaitable<T, Allocator>> out(std::move(_a));
-        // out.values_ = values_;
+        out.other_.ref_->values_ = values_;
         return out;
       };
 
@@ -114,9 +114,18 @@ namespace TBT::Execute {
   template <class Awaitable>
   struct CoStateAwaitable {
     Awaitable other_;
-    bool await_ready() noexcept { return other_.await_ready(); }
-    void await_suspend(const std::coroutine_handle<CoState::promise_type>& _h) { other_.await_suspend(_h); }
-    auto await_resume() noexcept { return other_.await_resume(); }
+    bool await_ready() noexcept {
+      return other_.await_ready();  //
+    }
+    void await_suspend(const std::coroutine_handle<CoState::promise_type>& _h) {
+      using handle = std::coroutine_handle<CoState::promise_type>;
+      //((handle*)&_h)->promise().parent_ = other_.values_;
+      //_h.promise().parent_ = other_.values_;
+      other_.await_suspend(_h);  //
+    }
+    auto await_resume() noexcept {
+      return other_.await_resume();  //
+    }
     explicit CoStateAwaitable(Awaitable&& _other) : other_(std::forward<Awaitable>(_other)) {}
   };
 
@@ -613,7 +622,10 @@ namespace TBT::Execute {
             task.ptr_         = 0;
             task.co_          = 0;
             // cres.coro_.destroy();
+            // if (co_state.handle_.promise().parent_) co_state.handle_.promise().parent_->set_done();
+            // if (co_state.parent_) co_state.parent_->set_done();
             const State value = co_state.get_value();
+            co_state.handle_.destroy();  // finalise the coroutine
             // return to parent if no children or last child or failed
             if (value == FAILED || task.cur_idx_ >= _header.children_count_) {
               task.cur_idx_                    = 0;

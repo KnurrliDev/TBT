@@ -66,17 +66,22 @@ namespace TBT {
           [](const auto& _v1, const auto& _v2) { return _v1.priority_ > _v2.priority_; }); \
     }                                                                                      \
     auto& queue = state_provider.tasks_queue_.q_;                                          \
-    for (auto curr = queue.begin(); curr != queue.end(); ++curr) {                         \
+    for (auto curr = queue.begin(); curr != queue.end();) {                                \
       TBT::ExecutionItem& item = *curr;                                                    \
-      if (item.last_update_ == state_provider.tasks_queue_.cur_frame_) continue;           \
+      if (item.last_update_ == state_provider.tasks_queue_.cur_frame_) {                   \
+        ++curr;                                                                            \
+        continue;                                                                          \
+      }                                                                                    \
       item.last_update_ = state_provider.tasks_queue_.cur_frame_;                          \
+      bool erased       = false;                                                           \
       switch (item.mode_) {                                                                \
         case TBT::STEPWISE_1: {                                                            \
           TBT::State r = item.tree_();                                                     \
           if (r != TBT::BUSY) {                                                            \
             item.promise_.set_value(r);                                                    \
             if (item.values_) item.values_->set_done();                                    \
-            curr = queue.erase(curr);                                                      \
+            curr   = queue.erase(curr);                                                    \
+            erased = true;                                                                 \
           }                                                                                \
           break;                                                                           \
         }                                                                                  \
@@ -89,7 +94,8 @@ namespace TBT {
           while ((r = item.tree_()) != TBT::BUSY) {}                                       \
           item.promise_.set_value(r);                                                      \
           if (item.values_) item.values_->set_done();                                      \
-          curr = queue.erase(curr);                                                        \
+          curr   = queue.erase(curr);                                                      \
+          erased = true;                                                                   \
           break;                                                                           \
         }                                                                                  \
         case TBT::FULL_INF: {                                                              \
@@ -97,6 +103,7 @@ namespace TBT {
           break;                                                                           \
         }                                                                                  \
       }                                                                                    \
+      if (!erased) ++curr;                                                                 \
       if (curr == queue.end()) break;                                                      \
     }                                                                                      \
   }

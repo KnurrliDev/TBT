@@ -80,8 +80,9 @@ namespace TBT::Execute {
 
       template <class T>
       CoStateAwaitable<Awaitable<T>> await_transform(Awaitable<T>&& _a) {
-        values_->state_ = CoStateState::AWAIT;
-        _a.values_      = values_;
+        values_->state_  = CoStateState::AWAIT;
+        values_->a_done_ = false;
+        _a.values_       = values_;
         CoStateAwaitable<Awaitable<T>> out(std::move(_a));
         // out.values_ = values_;
         return out;
@@ -89,7 +90,8 @@ namespace TBT::Execute {
 
       template <class T, class Allocator>
       CoStateAwaitable<TreeAwaitable<T, Allocator>> await_transform(TreeAwaitable<T, Allocator>&& _a) {
-        values_->state_ = CoStateState::AWAIT;
+        values_->state_  = CoStateState::AWAIT;
+        values_->a_done_ = false;
         //_a.values_      = values_;
         CoStateAwaitable<TreeAwaitable<T, Allocator>> out(std::move(_a));
         out.other_.ref_->values_ = values_;
@@ -98,8 +100,9 @@ namespace TBT::Execute {
 
       template <class Awaitable>
       CoStateAwaitable<Awaitable> await_transform(Awaitable&& _a) {
-        values_->state_ = CoStateState::AWAIT;
-        _a.values_      = values_;
+        values_->state_  = CoStateState::AWAIT;
+        values_->a_done_ = false;
+        _a.values_       = values_;
         CoStateAwaitable<Awaitable> out(std::move(_a));
         // out.values_ = values_;
         return out;

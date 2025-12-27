@@ -96,6 +96,15 @@ namespace TBT::Execute {
         return out;
       };
 
+      template <class Awaitable>
+      CoStateAwaitable<Awaitable> await_transform(Awaitable&& _a) {
+        values_->state_ = CoStateState::AWAIT;
+        _a.values_      = values_;
+        CoStateAwaitable<Awaitable> out(std::move(_a));
+        // out.values_ = values_;
+        return out;
+      };
+
     };  // promise_type
 
     std::shared_ptr<CoStateValues> values_;

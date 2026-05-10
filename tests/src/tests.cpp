@@ -1,25 +1,23 @@
 
 #include <TBT/parser.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include <glaze/glaze.hpp>
 #include <iomanip>
 #include <iostream>
 
 // using namespace TBT;
 // using namespace Compiler;
-struct Foo {
-  int s = 0;
-};
-
-constexpr std::string_view tree = "Foo()[Child1(),Child2()[GrandChild()]]Bar()";
-const size_t count              = TBT::count_nodes(tree);
 
 TEST_CASE("parser", "[util]") {
-  std::cout << count << std::endl;
+  // const std::string_view tree = "Foo()[Child1(),Child2()[GrandChild()]]Bar()";
+  const std::string_view tree = "Foo(), Bar()";
+  const auto count            = TBT::count_nodes(tree);
 
-  Foo s;
-  std::string buffer = glz::write_json(s).value_or("error");
-  // constexpr auto res              = TBT::parse<count>(tree);
+  // if constexpr (count) {
+  // } else {
+  //   constexpr auto er = TBT::print_error_msg(count.error());
+  //  static_assert(false, std::string_view(er.data(), er.size()));
+  //}
+  // std::cout << count << std::endl;
 }
 
 // TEST_CASE("string splitting", "[util]") {

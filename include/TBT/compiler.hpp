@@ -20,6 +20,20 @@
     sequence[BT]
 */
 
+/*
+Node (recursive):
+  - Leaf Task:          identifier[modifier]( param1, param2, ... )
+  - Composite Node:     identifier[modifier]( param1, param2, ... )[ Node, Node, ... ]
+  - State Machine:      FSM[ StateDefinition, ..., TransitionDefinition, ... ]
+
+StateDefinition:        identifier : Node
+TransitionDefinition:   identifier -> identifier : Node
+
+identifier is any valid name (e.g., move, sequence, selector, parallel, MyCustomTask, fsm).
+
+sequence[nloop(n=4)()[ Foo(bar=2), Foo[]()[] ]]
+*/
+
 namespace TBT::Compiler {
 
   // constexpr int16_t vidx_root           = -1;
@@ -430,14 +444,14 @@ namespace TBT::Compiler {
     size_t i                                       = 0;                                                           \
                                                                                                                   \
     const auto parse_node_name                     = [&]() -> std::expected<std::string_view, std::string_view> { \
-      size_t start = i;                                                                       \
-      while (i < s.size()) {                                                                  \
-        char c = s[i];                                                                        \
-        if (c == '(' || c == '[' || c == ']' || c == ',') break;                              \
-        ++i;                                                                                  \
-      }                                                                                       \
-      if (i == start) return std::unexpected("empty node name");                              \
-      return s.substr(start, i - start);                                                      \
+      size_t start = i;                                                                                           \
+      while (i < s.size()) {                                                                                      \
+        char c = s[i];                                                                                            \
+        if (c == '(' || c == '[' || c == ']' || c == ',') break;                                                  \
+        ++i;                                                                                                      \
+      }                                                                                                           \
+      if (i == start) return std::unexpected("empty node name");                                                  \
+      return s.substr(start, i - start);                                                                          \
     };                                                                                                            \
                                                                                                                   \
     const auto parse_params = [&]() -> std::vector<Parameter> {                                                   \

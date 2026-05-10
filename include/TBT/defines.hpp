@@ -15,6 +15,7 @@
 #include <forward_list>
 #include <functional>
 #include <future>
+#include <meta>
 #include <numeric>
 #include <optional>
 #include <stack>

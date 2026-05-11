@@ -3,6 +3,7 @@
 #include <TBT/defines.hpp>
 #include <TBT/ext/ctre/ctre.hpp>
 #include <format>
+#include <iostream>
 #include <queue>
 /*
 Node (recursive):
@@ -20,6 +21,14 @@ sequence[nloop(n=4)()[ Foo(bar=2), Foo[]()[] ]]
 
 namespace TBT {
 
+  [[nodiscard]] constexpr inline std::string_view to_view(const std::string& _s) noexcept {
+    return std::string_view(_s.data(), _s.size());
+  }  // to_view
+
+  [[nodiscard]] constexpr inline char ascii_to_lower(const char c) noexcept {
+    return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + 32) : c;
+  }  // ascii_to_lower
+
   enum class ErrorType {
     //
   };
@@ -29,6 +38,7 @@ namespace TBT {
     std::string_view options_;
     std::string_view parameters_;
     std::vector<Node> children_;
+    bool is_fsm = false;
   };  // Node
 
   struct Error {
@@ -75,7 +85,28 @@ namespace TBT {
     return out;
   };  // clean
 
-  constexpr auto extract = [](std::string_view input) -> std::expected<Node, Error> {
+  constexpr auto split = [](const std::string_view& _s, const char _delim) -> std::vector<std::string_view> {
+    std::vector<std::string_view> result;
+    size_t start = 0;
+    size_t end   = _s.find(_delim);
+
+    while (end != std::string::npos && end < _s.size()) {
+      if (start == end)
+        result.emplace_back();
+      else
+        result.push_back({&_s[start], end - start});
+      start = end + 1;
+      end   = _s.find(_delim, start);
+    }
+
+    if (start == _s.size())
+      result.emplace_back();
+    else
+      result.push_back({&_s[start], _s.size() - start});
+    return result;
+  };
+
+  constexpr auto extract = [](std::string_view& input) -> std::expected<Node, Error> {
     const auto extract_impl = [](std::string_view& input, auto& ref) -> std::expected<Node, Error> {
       Node node;
 
@@ -84,6 +115,10 @@ namespace TBT {
       if (auto m = ctre::starts_with<name_pat>(input)) {
         node.name_ = m.get<0>().to_view();  // whole match
         input.remove_prefix(m.get<0>().size());
+        if (node.name_.size() == 3) {
+          node.is_fsm = ascii_to_lower(node.name_[0]) == 'f' && ascii_to_lower(node.name_[1]) == 's' &&
+                        ascii_to_lower(node.name_[2]) == 'm';
+        }
       } else {
         return std::unexpected(Error());
       }
@@ -96,13 +131,18 @@ namespace TBT {
       }
 
       // 3. required (parameters...)
+      // std::cout << std::format("{}", input.size()) << std::endl;
       constexpr auto params_pat = ctll::fixed_string{R"(^\(([^)]*)\))"};
       if (auto m = ctre::starts_with<params_pat>(input)) {
         node.parameters_ = m.get<1>().to_view();
         input.remove_prefix(m.get<0>().size());
+        // std::cout << std::format("{}", m.get<0>().size()) << std::endl;
       } else {
         return std::unexpected(Error());  // mandatory part missing
       }
+      // std::cout << std::format("{}", input.size()) << std::endl;
+
+      if (node.is_fsm) return node;
 
       // 4. optional [child_node, child_node, ...]
       constexpr auto open_bracket_pat = ctll::fixed_string{R"(^\[)"};
@@ -177,12 +217,18 @@ namespace TBT {
 
     size_t out              = 0;
 
-    for (size_t idx = 0; idx < ctree.size(); ++idx) {
-      const char next = ctree[idx];
+    std::string_view to_ex  = to_view(ctree);
 
-      if (next == ',') { continue; }
+    while (!to_ex.empty()) {
+      // skip comma
+      std::cout << std::format("'{}' {} {}", to_ex, to_ex.size(), std::distance(to_ex.begin(), to_ex.end()))
+                << std::endl;
+      if (to_ex.front() == ',') {
+        to_ex.remove_prefix(1);
+        continue;
+      }
 
-      const auto node = extract(std::string_view(&ctree[idx], ctree.size()));
+      const auto node = extract(to_ex);
 
       if (node) {
         out += count_children_nodes(node.value());

@@ -8,7 +8,6 @@ endif()
 project(TBT)
 
 # --- C++ Standard ---
-set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)           # -std=c++23, not gnu++ 

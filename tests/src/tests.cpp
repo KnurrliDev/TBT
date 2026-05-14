@@ -4,464 +4,711 @@
 #include <iomanip>
 #include <iostream>
 
-// using namespace TBT;
+using namespace TBT;
+using namespace Parser;
 // using namespace Compiler;
 
-TEST_CASE("extract", "[parser]") {
+TEST_CASE("clean", "[dynamic parser]") {
+  const std::string_view input = R"(   apple,
+
+       banana  , orange)";
+
+  const std::string res        = clean(input);
+
+  REQUIRE(res == "apple,banana,orange");
+}
+
+//"Name[value,key=value](value,key=value)[Child1(),Name[value,key=value](value,key=value)[]]"
+
+TEST_CASE("next_node_name", "[dynamic parser]") {
+  SECTION("simple node") {
+    std::string_view input     = "Name()";
+
+    const std::string_view res = Parser::next_node_name(input);
+    REQUIRE(res.empty() == false);
+    REQUIRE(res == "Name");
+    REQUIRE(input == "()");
+  }
+
+  SECTION("simple node with options") {
+    std::string_view input     = "Name[value]()";
+
+    const std::string_view res = Parser::next_node_name(input);
+    REQUIRE(res.empty() == false);
+    REQUIRE(res == "Name");
+    REQUIRE(input == "[value]()");
+  }
+}
+
+TEST_CASE("is_fsm", "[dynamic parser]") {
+  const std::string_view i1 = "fsm";
+  const std::string_view i2 = "fsM";
+  const std::string_view i3 = "fSm";
+  const std::string_view i4 = "fSM";
+
+  const std::string_view i5 = "Fsm";
+  const std::string_view i6 = "FsM";
+  const std::string_view i7 = "FSm";
+  const std::string_view i8 = "FSM";
+
+  REQUIRE(is_fsm(i1));
+  REQUIRE(is_fsm(i2));
+  REQUIRE(is_fsm(i3));
+  REQUIRE(is_fsm(i4));
+  REQUIRE(is_fsm(i5));
+  REQUIRE(is_fsm(i6));
+  REQUIRE(is_fsm(i7));
+  REQUIRE(is_fsm(i8));
+}
+
+TEST_CASE("next_options", "[dynamic parser]") {
+  SECTION("empty") {
+    std::string_view input = "[]";
+
+    const auto res         = next_options(input);
+
+    REQUIRE(input.empty() == true);
+    REQUIRE(res.size() == 0);
+  }
+
+  SECTION("single value") {
+    std::string_view input = "[value]";
+
+    const auto res         = next_options(input);
+
+    REQUIRE(input.empty() == true);
+    REQUIRE(res.size() == 1);
+    REQUIRE(res.front().index() == 0);
+
+    const auto& val = std::get<0>(res.front());
+
+    REQUIRE(val.val == "value");
+  }
+
+  SECTION("single keyvalue") {
+    std::string_view input = "[key=value]";
+
+    const auto res         = next_options(input);
+
+    REQUIRE(input.empty() == true);
+    REQUIRE(res.size() == 1);
+    REQUIRE(res.front().index() == 1);
+
+    const auto& val = std::get<1>(res.front());
+
+    REQUIRE(val.key == "key");
+    REQUIRE(val.val == "value");
+  }
+
+  SECTION("mixed") {
+    std::string_view input = "[value,key=value,value,key=value]";
+
+    const auto res         = next_options(input);
+
+    REQUIRE(input.empty() == true);
+    REQUIRE(res.size() == 4);
+
+    REQUIRE(res[0].index() == 0);
+    REQUIRE(res[1].index() == 1);
+    REQUIRE(res[2].index() == 0);
+    REQUIRE(res[3].index() == 1);
+
+    {
+      const auto& val = std::get<0>(res[0]);
+      REQUIRE(val.val == "value");
+    }
+
+    {
+      const auto& val = std::get<1>(res[1]);
+      REQUIRE(val.val == "value");
+      REQUIRE(val.key == "key");
+    }
+
+    {
+      const auto& val = std::get<0>(res[2]);
+      REQUIRE(val.val == "value");
+    }
+
+    {
+      const auto& val = std::get<1>(res[3]);
+      REQUIRE(val.val == "value");
+      REQUIRE(val.key == "key");
+    }
+  }
+}
+
+TEST_CASE("next_parameters", "[dynamic parser]") {
+  SECTION("empty") {
+    std::string_view input = "()";
+
+    const auto res         = next_parameters(input);
+
+    REQUIRE(input.empty() == true);
+    REQUIRE(res.size() == 0);
+  }
+
+  SECTION("single value") {
+    std::string_view input = "(value)";
+
+    const auto res         = next_parameters(input);
+
+    REQUIRE(input.empty() == true);
+    REQUIRE(res.size() == 1);
+    REQUIRE(res.front().index() == 0);
+
+    const auto& val = std::get<0>(res.front());
+
+    REQUIRE(val.val == "value");
+  }
+
+  SECTION("single keyvalue") {
+    std::string_view input = "(key=value)";
+
+    const auto res         = next_parameters(input);
+
+    REQUIRE(input.empty() == true);
+    REQUIRE(res.size() == 1);
+    REQUIRE(res.front().index() == 1);
+
+    const auto& val = std::get<1>(res.front());
+
+    REQUIRE(val.key == "key");
+    REQUIRE(val.val == "value");
+  }
+
+  SECTION("mixed") {
+    std::string_view input = "(value,key=value,value,key=value)";
+
+    const auto res         = next_parameters(input);
+
+    REQUIRE(input.empty() == true);
+    REQUIRE(res.size() == 4);
+
+    REQUIRE(res[0].index() == 0);
+    REQUIRE(res[1].index() == 1);
+    REQUIRE(res[2].index() == 0);
+    REQUIRE(res[3].index() == 1);
+
+    {
+      const auto& val = std::get<0>(res[0]);
+      REQUIRE(val.val == "value");
+    }
+
+    {
+      const auto& val = std::get<1>(res[1]);
+      REQUIRE(val.val == "value");
+      REQUIRE(val.key == "key");
+    }
+
+    {
+      const auto& val = std::get<0>(res[2]);
+      REQUIRE(val.val == "value");
+    }
+
+    {
+      const auto& val = std::get<1>(res[3]);
+      REQUIRE(val.val == "value");
+      REQUIRE(val.key == "key");
+    }
+  }
+}
+
+TEST_CASE("FSM", "[dynamic parser]") {
+  SECTION("next_fsm_identifier") {
+    std::string_view val      = "s1:Bar,s2:Foo";
+
+    const std::string_view id = next_fsm_identifier(val);
+    REQUIRE(id == "s1");
+    REQUIRE(val == "Bar,s2:Foo");
+  }
+
+  SECTION("illegal next_fsm_identifier") {
+    std::string_view val      = "s1->Bar,s2:Foo";
+
+    const std::string_view id = next_fsm_identifier(val);
+    REQUIRE(id.empty());
+  }
+
+  SECTION("next_fsm_transition") {
+    std::string_view val = "s1->s2";
+
+    const auto res       = next_fsm_transition(val);
+    REQUIRE(res.has_value() == true);
+    REQUIRE(val.empty());
+
+    REQUIRE(res->from_ == "s1");
+    REQUIRE(res->to_ == "s2");
+  }
+
+  SECTION("next_fsm_transition with comma") {
+    std::string_view val = "s1->s2,s1->s2";
+
+    const auto res       = next_fsm_transition(val);
+    REQUIRE(res.has_value() == true);
+    REQUIRE(val == ",s1->s2");
+
+    REQUIRE(res->from_ == "s1");
+    REQUIRE(res->to_ == "s2");
+  }
+
+  SECTION("illegal next_fsm_transition") {
+    std::string_view val = "s1:s2";
+
+    const auto res       = next_fsm_transition(val);
+    REQUIRE(res.has_value() == false);
+  }
+}
+
+TEST_CASE("extract", "[dynamic parser]") {
   SECTION("single node") {
     std::string_view tree = "Foo()";
-    const auto res        = TBT::extract(tree);
+    const auto res        = extract(tree);
 
     REQUIRE(res);
-    REQUIRE(tree.empty());
+    REQUIRE(tree == "");
 
     const auto& n = res.value();
+    REQUIRE(n.index() == 0);
+    const auto& dn = std::get<0>(n);
 
-    REQUIRE(n.name_ == "Foo");
-    REQUIRE(n.options_ == "");
-    REQUIRE(n.parameters_ == "");
-    REQUIRE(n.children_.empty());
-    REQUIRE(n.is_fsm == false);
+    REQUIRE(dn.name_ == "Foo");
+    REQUIRE(dn.options_.empty() == true);
+    REQUIRE(dn.parameters_.empty() == true);
+    REQUIRE(dn.children_.empty());
   }
 
   SECTION("two node") {
     std::string_view tree = "Foo(),Bar()";
 
     {
-      const auto res = TBT::extract(tree);
+      const auto res = extract(tree);
 
       REQUIRE(res);
 
       const auto& n = res.value();
+      REQUIRE(n.index() == 0);
+      const auto& dn = std::get<0>(n);
 
-      REQUIRE(n.name_ == "Foo");
-      REQUIRE(n.options_ == "");
-      REQUIRE(n.parameters_ == "");
-      REQUIRE(n.children_.empty());
+      REQUIRE(dn.name_ == "Foo");
+      REQUIRE(dn.options_.empty());
+      REQUIRE(dn.parameters_.empty());
+      REQUIRE(dn.children_.empty());
     }
     tree.remove_prefix(1);
     REQUIRE(tree == "Bar()");
     {
-      const auto res = TBT::extract(tree);
+      const auto res = extract(tree);
 
       REQUIRE(res);
       REQUIRE(tree.empty());
 
       const auto& n = res.value();
+      REQUIRE(n.index() == 0);
+      const auto& dn = std::get<0>(n);
 
-      REQUIRE(n.name_ == "Bar");
-      REQUIRE(n.options_ == "");
-      REQUIRE(n.parameters_ == "");
-      REQUIRE(n.children_.empty());
+      REQUIRE(dn.name_ == "Bar");
+      REQUIRE(dn.options_.empty());
+      REQUIRE(dn.parameters_.empty());
+      REQUIRE(dn.children_.empty());
     }
+  }
+
+  SECTION("empty child") {
+    std::string_view tree = "Foo()[]";
+    const auto res        = extract(tree);
+
+    REQUIRE(res);
+    REQUIRE(tree == "");
+
+    const auto& n = res.value();
+    REQUIRE(n.index() == 0);
+    const auto& dn = std::get<0>(n);
+
+    REQUIRE(dn.name_ == "Foo");
+    REQUIRE(dn.options_.empty() == true);
+    REQUIRE(dn.parameters_.empty() == true);
+    REQUIRE(dn.children_.empty());
+  }
+
+  SECTION("empty options") {
+    std::string_view tree = "Foo[]()[]";
+    const auto res        = extract(tree);
+
+    REQUIRE(res);
+    REQUIRE(tree == "");
+
+    const auto& n = res.value();
+    REQUIRE(n.index() == 0);
+    const auto& dn = std::get<0>(n);
+
+    REQUIRE(dn.name_ == "Foo");
+    REQUIRE(dn.options_.empty());
+    REQUIRE(dn.parameters_.empty());
+    REQUIRE(dn.children_.empty());
   }
 
   SECTION("single child") {
     std::string_view tree = "Bar()[Foo()]";
-    const auto res        = TBT::extract(tree);
+    const auto res        = extract(tree);
 
     REQUIRE(res);
     REQUIRE(tree.empty());
 
     const auto& n = res.value();
+    REQUIRE(n.index() == 0);
+    const auto& dn = std::get<0>(n);
 
-    REQUIRE(n.name_ == "Bar");
-    REQUIRE(n.options_ == "");
-    REQUIRE(n.parameters_ == "");
-    REQUIRE(n.children_.size() == 1);
+    REQUIRE(dn.name_ == "Bar");
+    REQUIRE(dn.options_.empty());
+    REQUIRE(dn.parameters_.empty());
+    REQUIRE(dn.children_.size() == 1);
 
-    const auto& nc = n.children_[0];
+    const auto& n1 = *dn.children_[0];
+    REQUIRE(n1.index() == 0);
+    const auto& dn1 = std::get<0>(n1);
 
-    REQUIRE(nc.name_ == "Foo");
-    REQUIRE(nc.options_ == "");
-    REQUIRE(nc.parameters_ == "");
-    REQUIRE(nc.children_.empty());
+    REQUIRE(dn1.name_ == "Foo");
+    REQUIRE(dn1.options_.empty());
+    REQUIRE(dn1.parameters_.empty());
+    REQUIRE(dn1.children_.empty());
   }
 
   SECTION("two child") {
     std::string_view tree = "Bar()[Foo(),Foo()]";
-    const auto res        = TBT::extract(tree);
+    const auto res        = extract(tree);
 
     REQUIRE(res);
     REQUIRE(tree.empty());
 
     const auto& n = res.value();
+    REQUIRE(n.index() == 0);
+    const auto& dn = std::get<0>(n);
 
-    REQUIRE(n.name_ == "Bar");
-    REQUIRE(n.options_ == "");
-    REQUIRE(n.parameters_ == "");
-    REQUIRE(n.children_.size() == 2);
+    REQUIRE(dn.name_ == "Bar");
+    REQUIRE(dn.options_.empty());
+    REQUIRE(dn.parameters_.empty());
+    REQUIRE(dn.children_.size() == 2);
 
-    const auto& nc1 = n.children_[0];
-    const auto& nc2 = n.children_[1];
+    const auto& nc1 = std::get<0>(*dn.children_[0]);
+    const auto& nc2 = std::get<0>(*dn.children_[1]);
 
     REQUIRE(nc1.name_ == "Foo");
-    REQUIRE(nc1.options_ == "");
-    REQUIRE(nc1.parameters_ == "");
+    REQUIRE(nc1.options_.empty());
+    REQUIRE(nc1.parameters_.empty());
     REQUIRE(nc1.children_.empty());
 
     REQUIRE(nc2.name_ == "Foo");
-    REQUIRE(nc2.options_ == "");
-    REQUIRE(nc2.parameters_ == "");
+    REQUIRE(nc2.options_.empty());
+    REQUIRE(nc2.parameters_.empty());
     REQUIRE(nc2.children_.empty());
   }
 
   SECTION("two child nested") {
     std::string_view tree = "Bar()[Foo()[Foo()]]";
-    const auto res        = TBT::extract(tree);
+    const auto res        = extract(tree);
 
     REQUIRE(res);
     REQUIRE(tree.empty());
 
     const auto& n = res.value();
+    REQUIRE(n.index() == 0);
+    const auto& dn = std::get<0>(n);
 
-    REQUIRE(n.name_ == "Bar");
-    REQUIRE(n.options_ == "");
-    REQUIRE(n.parameters_ == "");
-    REQUIRE(n.children_.size() == 1);
+    REQUIRE(dn.name_ == "Bar");
+    REQUIRE(dn.options_.empty());
+    REQUIRE(dn.parameters_.empty());
+    REQUIRE(dn.children_.size() == 1);
 
-    const auto& nc1 = n.children_[0];
+    const auto& nc1 = std::get<0>(*dn.children_[0]);
 
     REQUIRE(nc1.name_ == "Foo");
-    REQUIRE(nc1.options_ == "");
-    REQUIRE(nc1.parameters_ == "");
+    REQUIRE(nc1.options_.empty());
+    REQUIRE(nc1.parameters_.empty());
     REQUIRE(nc1.children_.size() == 1);
 
-    const auto& nc2 = nc1.children_[0];
+    const auto& nc2 = std::get<0>(*nc1.children_[0]);
 
     REQUIRE(nc2.name_ == "Foo");
-    REQUIRE(nc2.options_ == "");
-    REQUIRE(nc2.parameters_ == "");
+    REQUIRE(nc2.options_.empty());
+    REQUIRE(nc2.parameters_.empty());
     REQUIRE(nc2.children_.empty());
   }
 
   SECTION("single node with options") {
     std::string_view tree = "Foo[foo]()";
-    const auto res        = TBT::extract(tree);
+    const auto res        = extract(tree);
 
     REQUIRE(res);
     REQUIRE(tree.empty());
 
     const auto& n = res.value();
+    REQUIRE(n.index() == 0);
+    const auto& dn = std::get<0>(n);
 
-    REQUIRE(n.name_ == "Foo");
-    REQUIRE(n.options_ == "foo");
-    REQUIRE(n.parameters_ == "");
-    REQUIRE(n.children_.empty());
+    REQUIRE(dn.name_ == "Foo");
+    REQUIRE(dn.parameters_.empty());
+    REQUIRE(dn.children_.empty());
+
+    REQUIRE(dn.options_.size() == 1);
+    REQUIRE(dn.options_[0].index() == 0);
+    REQUIRE(std::get<0>(dn.options_[0]).val == "foo");
   }
 
   SECTION("two node with options") {
-    std::string_view tree = "Foo[foo](),Bar[bar]()";
+    std::string_view tree = "Foo[foo](),Bar[bar=val]()";
 
     {
-      const auto res = TBT::extract(tree);
+      const auto res = extract(tree);
 
       REQUIRE(res);
 
       const auto& n = res.value();
+      REQUIRE(n.index() == 0);
+      const auto& dn = std::get<0>(n);
 
-      REQUIRE(n.name_ == "Foo");
-      REQUIRE(n.options_ == "foo");
-      REQUIRE(n.parameters_ == "");
-      REQUIRE(n.children_.empty());
+      REQUIRE(dn.name_ == "Foo");
+      REQUIRE(dn.parameters_.empty());
+      REQUIRE(dn.children_.empty());
+
+      REQUIRE(dn.options_.size() == 1);
+      REQUIRE(dn.options_[0].index() == 0);
+      REQUIRE(std::get<0>(dn.options_[0]).val == "foo");
     }
     tree.remove_prefix(1);
-    REQUIRE(tree == "Bar[bar]()");
     {
-      const auto res = TBT::extract(tree);
+      const auto res = extract(tree);
 
       REQUIRE(res);
       REQUIRE(tree.empty());
 
       const auto& n = res.value();
+      REQUIRE(n.index() == 0);
+      const auto& dn = std::get<0>(n);
 
-      REQUIRE(n.name_ == "Bar");
-      REQUIRE(n.options_ == "bar");
-      REQUIRE(n.parameters_ == "");
-      REQUIRE(n.children_.empty());
+      REQUIRE(dn.name_ == "Bar");
+      REQUIRE(dn.parameters_.empty());
+      REQUIRE(dn.children_.empty());
+
+      REQUIRE(dn.options_.size() == 1);
+      REQUIRE(dn.options_[0].index() == 1);
+      REQUIRE(std::get<1>(dn.options_[0]).key == "bar");
+      REQUIRE(std::get<1>(dn.options_[0]).val == "val");
     }
   }
 
   SECTION("single child with options") {
     std::string_view tree = "Bar[bar]()[Foo[foo]()]";
-    const auto res        = TBT::extract(tree);
+    const auto res        = extract(tree);
 
     REQUIRE(res);
     REQUIRE(tree.empty());
 
     const auto& n = res.value();
+    REQUIRE(n.index() == 0);
+    const auto& dn = std::get<0>(n);
 
-    REQUIRE(n.name_ == "Bar");
-    REQUIRE(n.options_ == "bar");
-    REQUIRE(n.parameters_ == "");
-    REQUIRE(n.children_.size() == 1);
+    REQUIRE(dn.name_ == "Bar");
+    REQUIRE(dn.parameters_.empty());
+    REQUIRE(dn.children_.size() == 1);
 
-    const auto& nc = n.children_[0];
+    REQUIRE(dn.options_.size() == 1);
+    REQUIRE(dn.options_[0].index() == 0);
+    REQUIRE(std::get<0>(dn.options_[0]).val == "bar");
 
-    REQUIRE(nc.name_ == "Foo");
-    REQUIRE(nc.options_ == "foo");
-    REQUIRE(nc.parameters_ == "");
-    REQUIRE(nc.children_.empty());
-  }
+    const auto& nc = dn.children_[0];
+    REQUIRE(nc->index() == 0);
+    const auto& dc = std::get<0>(*nc);
 
-  SECTION("two child with options") {
-    std::string_view tree = "Bar[bar]()[Foo[foo](),Foo[foo]()]";
-    const auto res        = TBT::extract(tree);
+    REQUIRE(dc.name_ == "Foo");
+    REQUIRE(dc.parameters_.empty());
+    REQUIRE(dc.children_.empty());
 
-    REQUIRE(res);
-    REQUIRE(tree.empty());
-
-    const auto& n = res.value();
-
-    REQUIRE(n.name_ == "Bar");
-    REQUIRE(n.options_ == "bar");
-    REQUIRE(n.parameters_ == "");
-    REQUIRE(n.children_.size() == 2);
-
-    const auto& nc1 = n.children_[0];
-    const auto& nc2 = n.children_[1];
-
-    REQUIRE(nc1.name_ == "Foo");
-    REQUIRE(nc1.options_ == "foo");
-    REQUIRE(nc1.parameters_ == "");
-    REQUIRE(nc1.children_.empty());
-
-    REQUIRE(nc2.name_ == "Foo");
-    REQUIRE(nc2.options_ == "foo");
-    REQUIRE(nc2.parameters_ == "");
-    REQUIRE(nc2.children_.empty());
-  }
-
-  SECTION("two child nested with options") {
-    std::string_view tree = "Bar[bar]()[Foo[foo]()[Foo[foo]()]]";
-    const auto res        = TBT::extract(tree);
-
-    REQUIRE(res);
-    REQUIRE(tree.empty());
-
-    const auto& n = res.value();
-
-    REQUIRE(n.name_ == "Bar");
-    REQUIRE(n.options_ == "bar");
-    REQUIRE(n.parameters_ == "");
-    REQUIRE(n.children_.size() == 1);
-
-    const auto& nc1 = n.children_[0];
-
-    REQUIRE(nc1.name_ == "Foo");
-    REQUIRE(nc1.options_ == "foo");
-    REQUIRE(nc1.parameters_ == "");
-    REQUIRE(nc1.children_.size() == 1);
-
-    const auto& nc2 = nc1.children_[0];
-
-    REQUIRE(nc2.name_ == "Foo");
-    REQUIRE(nc2.options_ == "foo");
-    REQUIRE(nc2.parameters_ == "");
-    REQUIRE(nc2.children_.empty());
-  }
-
-  SECTION("single node with options and parameters") {
-    std::string_view tree = "Foo[foo,foo](bar,bar)";
-    const auto res        = TBT::extract(tree);
-
-    REQUIRE(res);
-    REQUIRE(tree.empty());
-
-    const auto& n = res.value();
-
-    REQUIRE(n.name_ == "Foo");
-    REQUIRE(n.options_ == "foo,foo");
-    REQUIRE(n.parameters_ == "bar,bar");
-    REQUIRE(n.children_.empty());
-  }
-
-  SECTION("two node with options and parameters") {
-    std::string_view tree = "Foo[foo,foo](bar,bar),Bar[foo,foo](bar,bar)";
-
-    {
-      const auto res = TBT::extract(tree);
-
-      REQUIRE(res);
-
-      const auto& n = res.value();
-
-      REQUIRE(n.name_ == "Foo");
-      REQUIRE(n.options_ == "foo,foo");
-      REQUIRE(n.parameters_ == "bar,bar");
-      REQUIRE(n.children_.empty());
-    }
-    tree.remove_prefix(1);
-    REQUIRE(tree == "Bar[foo,foo](bar,bar)");
-    {
-      const auto res = TBT::extract(tree);
-
-      REQUIRE(res);
-      REQUIRE(tree.empty());
-
-      const auto& n = res.value();
-
-      REQUIRE(n.name_ == "Bar");
-      REQUIRE(n.options_ == "foo,foo");
-      REQUIRE(n.parameters_ == "bar,bar");
-      REQUIRE(n.children_.empty());
-    }
-  }
-
-  SECTION("single child with options and parameters") {
-    std::string_view tree = "Bar[foo,foo](bar,bar)[Foo[foo,foo](bar,bar)]";
-    const auto res        = TBT::extract(tree);
-
-    REQUIRE(res);
-    REQUIRE(tree.empty());
-
-    const auto& n = res.value();
-
-    REQUIRE(n.name_ == "Bar");
-    REQUIRE(n.options_ == "foo,foo");
-    REQUIRE(n.parameters_ == "bar,bar");
-    REQUIRE(n.children_.size() == 1);
-
-    const auto& nc = n.children_[0];
-
-    REQUIRE(nc.name_ == "Foo");
-    REQUIRE(nc.options_ == "foo,foo");
-    REQUIRE(nc.parameters_ == "bar,bar");
-    REQUIRE(nc.children_.empty());
-  }
-
-  SECTION("two child with options and parameters") {
-    std::string_view tree = "Bar[foo,foo](bar,bar)[Foo[foo,foo](bar,bar),Foo[foo,foo](bar,bar)]";
-    const auto res        = TBT::extract(tree);
-
-    REQUIRE(res);
-    REQUIRE(tree.empty());
-
-    const auto& n = res.value();
-
-    REQUIRE(n.name_ == "Bar");
-    REQUIRE(n.options_ == "foo,foo");
-    REQUIRE(n.parameters_ == "bar,bar");
-    REQUIRE(n.children_.size() == 2);
-
-    const auto& nc1 = n.children_[0];
-    const auto& nc2 = n.children_[1];
-
-    REQUIRE(nc1.name_ == "Foo");
-    REQUIRE(nc1.options_ == "foo,foo");
-    REQUIRE(nc1.parameters_ == "bar,bar");
-    REQUIRE(nc1.children_.empty());
-
-    REQUIRE(nc2.name_ == "Foo");
-    REQUIRE(nc2.options_ == "foo,foo");
-    REQUIRE(nc2.parameters_ == "bar,bar");
-    REQUIRE(nc2.children_.empty());
+    REQUIRE(dc.options_.size() == 1);
+    REQUIRE(dc.options_[0].index() == 0);
+    REQUIRE(std::get<0>(dc.options_[0]).val == "foo");
   }
 
   SECTION("two child nested with options and parameters") {
-    std::string_view tree = "Bar[foo,foo](bar,bar)[Foo[foo,foo](bar,bar)[Foo[foo,foo](bar,bar)]]";
-    const auto res        = TBT::extract(tree);
+    std::string_view tree =
+        "Bar[foo,key=foo](key=bar,bar)[Foo[key=foo,key=foo](bar,key=bar)[Foo[key=foo,foo](key=bar,bar)]]";
+    const auto res = extract(tree);
 
     REQUIRE(res);
     REQUIRE(tree.empty());
 
-    const auto& n = res.value();
+    const auto& n1 = res.value();
+    REQUIRE(n1.index() == 0);
+    const auto& dn1 = std::get<0>(n1);
 
-    REQUIRE(n.name_ == "Bar");
-    REQUIRE(n.options_ == "foo,foo");
-    REQUIRE(n.parameters_ == "bar,bar");
-    REQUIRE(n.children_.size() == 1);
+    REQUIRE(dn1.name_ == "Bar");
+    REQUIRE(dn1.options_.size() == 2);
+    REQUIRE(dn1.parameters_.size() == 2);
+    REQUIRE(dn1.children_.size() == 1);
 
-    const auto& nc1 = n.children_[0];
+    const auto& n2 = *dn1.children_[0];
+    REQUIRE(n2.index() == 0);
+    const auto& dn2 = std::get<0>(n2);
 
-    REQUIRE(nc1.name_ == "Foo");
-    REQUIRE(nc1.options_ == "foo,foo");
-    REQUIRE(nc1.parameters_ == "bar,bar");
-    REQUIRE(nc1.children_.size() == 1);
+    REQUIRE(dn2.name_ == "Foo");
+    REQUIRE(dn2.options_.size() == 2);
+    REQUIRE(dn2.parameters_.size() == 2);
+    REQUIRE(dn2.children_.size() == 1);
 
-    const auto& nc2 = nc1.children_[0];
+    const auto& n3 = *dn2.children_[0];
+    REQUIRE(n3.index() == 0);
+    const auto& dn3 = std::get<0>(n3);
 
-    REQUIRE(nc2.name_ == "Foo");
-    REQUIRE(nc2.options_ == "foo,foo");
-    REQUIRE(nc2.parameters_ == "bar,bar");
-    REQUIRE(nc2.children_.empty());
+    REQUIRE(dn3.name_ == "Foo");
+    REQUIRE(dn3.options_.size() == 2);
+    REQUIRE(dn3.parameters_.size() == 2);
+    REQUIRE(dn3.children_.size() == 0);
   }
+}
 
-  SECTION("FSM two child nested") {
-    std::string_view tree = "Bar()[Foo()[FsM(foo->bar)]]";
-    const auto res        = TBT::extract(tree);
+TEST_CASE("extract FSM", "[dynamic parser]") {
+  SECTION("single state") {
+    std::string_view tree = "FSM(s1:Foo(),s2:Bar(),s1->s2,s2->s1)";
+    const auto res        = extract(tree);
 
     REQUIRE(res);
-    REQUIRE(tree.empty());
+    REQUIRE(tree == "");
 
     const auto& n = res.value();
+    REQUIRE(n.index() == 1);
+    const auto& fsm = std::get<1>(n);
 
-    REQUIRE(n.name_ == "Bar");
-    REQUIRE(n.options_ == "");
-    REQUIRE(n.parameters_ == "");
-    REQUIRE(n.children_.size() == 1);
+    REQUIRE(fsm.options_.empty());
 
-    const auto& nc1 = n.children_[0];
+    REQUIRE(fsm.states_.size() == 2);
+    REQUIRE(fsm.states_[0].id_ == "s1");
+    REQUIRE(fsm.states_[0].node_);
+    REQUIRE(fsm.states_[1].id_ == "s2");
+    REQUIRE(fsm.states_[1].node_);
 
-    REQUIRE(nc1.name_ == "Foo");
-    REQUIRE(nc1.options_ == "");
-    REQUIRE(nc1.parameters_ == "");
-    REQUIRE(nc1.children_.size() == 1);
-
-    const auto& nc2 = nc1.children_[0];
-
-    REQUIRE(nc2.name_ == "FsM");
-    REQUIRE(nc2.options_ == "");
-    REQUIRE(nc2.parameters_ == "foo->bar");
-    REQUIRE(nc2.children_.empty());
-    REQUIRE(nc2.is_fsm);
+    REQUIRE(fsm.transitions_.size() == 2);
+    REQUIRE(fsm.transitions_[0].from_ == "s1");
+    REQUIRE(fsm.transitions_[0].to_ == "s2");
+    REQUIRE(fsm.transitions_[1].from_ == "s2");
+    REQUIRE(fsm.transitions_[1].to_ == "s1");
   }
 }
 
-TEST_CASE("count children nodes", "[parser]") {
-  SECTION("single node") {
+TEST_CASE("root_extract", "[dynamic parser]") {
+  SECTION("single") {
     std::string_view tree = "Foo()";
-    const auto res        = TBT::extract(tree);
-    const size_t c        = TBT::count_children_nodes(res.value());
-    REQUIRE(c == 1);
+    const auto res        = root_extract(tree);
+    REQUIRE(res);
+    REQUIRE(tree == "");
+
+    const auto& root = res.value();
+
+    REQUIRE(root.children_.size() == 1);
   }
 
-  SECTION("nested nodes") {
-    std::string_view tree = "Foo()[Foo(),Foo()[Foo()]]";
-    const auto res        = TBT::extract(tree);
-    const size_t c        = TBT::count_children_nodes(res.value());
-    REQUIRE(c == 4);
-  }
-}
+  SECTION("multi") {
+    std::string_view tree = "Foo(),Foo(),Foo(),Foo(),Foo()";
+    const auto res        = root_extract(tree);
+    REQUIRE(res);
+    REQUIRE(tree == "");
 
-TEST_CASE("count nodes", "[parser]") {
-  SECTION("single node") {
-    std::string_view tree = "Foo()";
-    const auto res        = TBT::extract(tree);
-    const size_t c        = TBT::count_children_nodes(res.value());
-    REQUIRE(c == 1);
-  }
+    const auto& root = res.value();
 
-  SECTION("nested nodes") {
-    std::string_view tree = "Foo()[Foo(),Foo()[Foo()],Foo()[Foo(),Foo()[Foo()]],Foo()";
-    const auto res        = TBT::extract(tree);
-    const size_t c        = TBT::count_children_nodes(res.value());
-    REQUIRE(c == 9);
+    REQUIRE(root.children_.size() == 5);
   }
 }
 
-TEST_CASE("parser", "[util]") {
-  // const std::string_view tree = "Foo()[Child1(),Child2()[GrandChild()]]Bar()";
-  const std::string_view tree = "Foo(),Bar()";
-  const auto count            = TBT::count_nodes(tree);
+TEST_CASE("count_children_nodes", "[dynamic parser]") {
+  SECTION("hierarchy") {
+    std::string_view tree = "Foo()[Foo(),Foo()[Foo(),Foo(),Foo()]]";
+    const auto count      = count_nodes(tree);
+    REQUIRE(count);
 
-  // if constexpr (count) {
-  // } else {
-  //   constexpr auto er = TBT::print_error_msg(count.error());
-  //  static_assert(false, std::string_view(er.data(), er.size()));
-  //}
-  if (count) { std::cout << count.value() << std::endl; }
+    REQUIRE(count.value() == 7);  //+1 for root
+  }
+
+  SECTION("hierarchy with FSM") {
+    std::string_view tree = "Foo()[Foo(),Foo()[Foo(),Foo(),FSM(s1:Foo(),s2:Foo())]]";
+    const auto count      = count_nodes(tree);
+    REQUIRE(count);
+
+    REQUIRE(count.value() == 9);
+  }
 }
+
+// SECTION("FSM two child nested") {
+//   std::string_view tree = "Bar()[Foo()[FsM(foo->bar)]]";
+//   const auto res        = TBT::extract(tree);
+
+//   REQUIRE(res);
+//   REQUIRE(tree.empty());
+
+//   const auto& n = res.value();
+
+//   REQUIRE(n.name_ == "Bar");
+//   REQUIRE(n.options_ == "");
+//   REQUIRE(n.parameters_ == "");
+//   REQUIRE(n.children_.size() == 1);
+
+//   const auto& nc1 = n.children_[0];
+
+//   REQUIRE(nc1.name_ == "Foo");
+//   REQUIRE(nc1.options_ == "");
+//   REQUIRE(nc1.parameters_ == "");
+//   REQUIRE(nc1.children_.size() == 1);
+
+//   const auto& nc2 = nc1.children_[0];
+
+//   REQUIRE(nc2.name_ == "FsM");
+//   REQUIRE(nc2.options_ == "");
+//   REQUIRE(nc2.parameters_ == "foo->bar");
+//   REQUIRE(nc2.children_.empty());
+//   REQUIRE(nc2.is_fsm);
+// }
+
+// TEST_CASE("count children nodes", "[parser]") {
+//   SECTION("single node") {
+//     std::string_view tree = "Foo()";
+//     const auto res        = TBT::extract(tree);
+//     const size_t c        = TBT::count_children_nodes(res.value());
+//     REQUIRE(c == 1);
+//   }
+
+//   SECTION("nested nodes") {
+//     std::string_view tree = "Foo()[Foo(),Foo()[Foo()]]";
+//     const auto res        = TBT::extract(tree);
+//     const size_t c        = TBT::count_children_nodes(res.value());
+//     REQUIRE(c == 4);
+//   }
+// }
+
+// TEST_CASE("count nodes", "[parser]") {
+//   SECTION("single node") {
+//     std::string_view tree = "Foo()";
+//     const auto res        = TBT::extract(tree);
+//     const size_t c        = TBT::count_children_nodes(res.value());
+//     REQUIRE(c == 1);
+//   }
+
+//   SECTION("nested nodes") {
+//     std::string_view tree = "Foo()[Foo(),Foo()[Foo()],Foo()[Foo(),Foo()[Foo()]],Foo()";
+//     const auto res        = TBT::extract(tree);
+//     const size_t c        = TBT::count_children_nodes(res.value());
+//     REQUIRE(c == 9);
+//   }
+// }
+
+// TEST_CASE("parser", "[util]") {
+//   // const std::string_view tree = "Foo()[Child1(),Child2()[GrandChild()]]Bar()";
+//   const std::string_view tree = "Foo(),Bar()";
+//   const auto count            = TBT::count_nodes(tree);
+
+//   // if constexpr (count) {
+//   // } else {
+//   //   constexpr auto er = TBT::print_error_msg(count.error());
+//   //  static_assert(false, std::string_view(er.data(), er.size()));
+//   //}
+//   if (count) { std::cout << count.value() << std::endl; }
+// }
 
 // TEST_CASE("string splitting", "[util]") {
 //   F_SPLIT
@@ -1539,8 +1786,8 @@ TEST_CASE("parser", "[util]") {
 //     item.priority_    = 0;
 //     item.mode_        = STEPWISE_1;
 //     item.tree_ = TBT_COMPILE_AND_PREPARE("TaskA($0)[TaskB($1), TaskC($2)] TaskA($3)", state_provider, 10, 20, 30,
-//     40); state_provider.tasks_queue_.dirty_ = true; std::future<TBT::State> f          = item.promise_.get_future();
-//     state_provider.tasks_queue_.q_.push_back(std::move(item));
+//     40); state_provider.tasks_queue_.dirty_ = true; std::future<TBT::State> f          =
+//     item.promise_.get_future(); state_provider.tasks_queue_.q_.push_back(std::move(item));
 //     TBT::TreeAwaitable<TBT::ExecutionItem> out;
 //     out.future_ = std::move(f);
 //     out.ref_    = std::prev(state_provider.tasks_queue_.q_.end());

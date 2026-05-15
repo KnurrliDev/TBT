@@ -1,12 +1,40 @@
 
+#include <TBT/TaskVariant.hpp>
+#include <TBT/compiler.hpp>
 #include <TBT/parser.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <iomanip>
 #include <iostream>
 
+namespace TBT {
+  struct TaskFoo {};
+  struct Task_Bar {};
+}  // namespace TBT
+
 using namespace TBT;
 using namespace Parser;
 // using namespace Compiler;
+
+DefineTaskVariant
+
+TEST_CASE("real_size", "[compiler]") {
+  struct Foo {
+    int32_t t1 = 42;
+    bool t2    = true;
+  } val;
+
+  constexpr size_t size = Compiler::real_size<Foo>();
+  std::cout << size << ", " << sizeof(Foo) << std::endl;
+
+  const auto s  = Compiler::serialize<Foo>(val);
+
+  const Foo res = Compiler::deserialize<Foo>(s);
+
+  REQUIRE(res.t1 == val.t1);
+  REQUIRE(res.t2 == val.t2);
+
+  print_variant_types<TaskVariant>();
+}
 
 TEST_CASE("clean", "[dynamic parser]") {
   const std::string_view input = R"(   apple,

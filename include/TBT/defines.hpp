@@ -53,22 +53,6 @@ namespace TBT {
   template <class... Ts>
   overloaded(Ts...) -> overloaded<Ts...>;
 
-#define ENABLE_TBT_TYPENAME(A, B)                    \
-  template <>                                        \
-  struct Detail::TypeName<A> {                       \
-    static constexpr const char* Get() { return B; } \
-  };
-
-  // until the macro is fixed
-  struct Dummy {};
-  ENABLE_TBT_TYPENAME(Dummy, "Dummy")
-
-#define EXPAND(x) x
-#define EEXPAND(x) EXPAND(x)
-
-#define SEXPAND(x) #x
-#define SEEXPAND(x) SEXPAND(x)
-
   enum State : uint32_t { BUSY, FAILED, SUCCESS };
 
   enum Direction : uint32_t { UP, DOWN };

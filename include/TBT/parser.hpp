@@ -18,6 +18,9 @@ TransitionDefinition:   identifier -> identifier : Node
 
 identifier is any valid name (e.g., move, sequence, selector, parallel, MyCustomTask, fsm).
 
+Foo(dong=5.1, ding=$1, )  by name
+Foo(5.1, $1)              initializer list
+
 FSM(s1:Foo, s2:Bar, s1->s2: Foo, s2->s1: Bar)
 sequence[nloop(n=4)()[ Foo(bar=2), Foo[]()[] ]]
 */
@@ -125,6 +128,7 @@ namespace TBT {
     using Node = std::variant<Default_Node, FSM_Node>;
 
     struct Default_Node {
+      size_t idx_;
       std::string_view name_;
       std::vector<Parameter> options_;
       std::vector<Parameter> parameters_;
@@ -141,6 +145,7 @@ namespace TBT {
     };
 
     struct FSM_Node {
+      size_t idx_;
       std::vector<Parameter> options_;
       std::vector<FSM_State> states_;
       std::vector<FSM_Transition> transitions_;
